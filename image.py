@@ -12,6 +12,7 @@ import json
 import requests
 import tempfile
 import mistune
+import markdown as md
 import psycopg2
 import html2text
 from typing import List, Tuple, Dict
@@ -108,13 +109,14 @@ Your primary goal is to deliver an accurate, in-depth evaluation of the business
 1. **Assign a Grade for Each Key in the Context:**
    - Assign a grade between 1 and 10 for each section.
    - Higher grades should correspond to higher investment potential, considering ROI or Sharpe ratio, while lower grades reflect higher risks or lower returns.
+   -Consider conversative approach for the grading  because investment is a risk investors can loss money 
 
 2. **Provide Detailed Reasoning:**
-   - **Qualitative Insights:**
-     - Describe qualitative factors influencing each section's investment potential, such as market trends, competitive landscape, management quality, and strategic advantages.
-   - **Quantitative Analysis:**
-     - Include numerical data or statistical analysis to support your assessment, using metrics such as growth rates, financial ratios, market share, and other relevant financial indicators.
-
+   - Ensure the grades given are backed by comprehensive and in-depth explanations.
+   - Incorporate detailed reasoning from both qualitative and quantitative perspectives.
+   - Support your assessments with numerical data and statistical analysis if present.
+   - Ensure your evaluations are robust and well-supported with concrete evidence and thorough analysis.
+   
 3. **Assign a Weight to Each Section:**
    - Determine the importance of each section relative to the overall investment potential. Assign a weight between 0 and 1 for each section, ensuring the total weights add up to 1.
    - Higher weights should be given to sections that are more critical to the investment decision-making process.
@@ -178,110 +180,6 @@ Your primary goal is to deliver an accurate, in-depth evaluation of the business
 Take a deep breath and work on this problem step-by-step.
 
 ---
-"""
-ScoringPrompt = """
-
-You are a seasoned venture capitalist with over 20 years of experience in evaluating pitch decks for startups. Your task is to meticulously analyze the provided CONTEXT, which contains various queries and their corresponding responses related to a pitch deck. Adopt a conservative approach to scoring, considering the inherent risks in investments. Assign lower scores to reflect potential concerns. Each topic should be analyzed, scored, and the output provided in a concise JSON format, including the final weighted score.
-
-**Instructions:**
-
-1. **Introduction and Context**:
-   - **Context**: You will analyze a pitch deck containing multiple queries and their responses. These responses cover various aspects of the business, such as product/service details, target market, revenue streams, financial performance, team credentials, competitive landscape, and more.
-
-2. **Scoring Methodology**:
-   - **Weights and Scores**: Each query is associated with a weight that indicates its importance in the overall evaluation. Assign a score from 1 to 10 for each query response, where 1 indicates high risk or significant concerns and 10 indicates low risk or strong attributes.
-     - **1-3**: High risk or severe weaknesses.
-     - **4-6**: Moderate risk or noticeable weaknesses.
-     - **7-9**: Low risk or minor weaknesses.
-     - **10**: Very low risk or exceptional strengths.
-
-3. **Analyze and Score Queries**:
-   - **Query Analysis**: For each query, review the provided response, assign a score, and explain your reasoning. Use the provided weight to assess its impact on the overall evaluation.
-   - **Focus Areas**:
-     - **Clarity and Detail**: Assess whether the response is clear and detailed.
-     - **Feasibility and Realism**: Consider the practicality and realism of the response.
-     - **Risk and Uncertainty**: Evaluate potential risks and uncertainties highlighted in the response.
-     - **Strengths and Weaknesses**: Identify any strengths or weaknesses in the response.
-
-4. **Output Format**:
-   - **JSON Object**: Each query, response, weight, score, and reasoning should be included in a concise JSON object. Additionally, the final weighted score should be included at the end. The JSON output should be structured as follows:
-     ```json
-     {
-       "queries": [
-         {
-           "query": "What is the company's product/service, and what are its key features?",
-           "response": "The product is a cloud-based software solution that offers real-time data analytics and reporting features.",
-           "weight": 0.1,
-           "score": 7,
-           "reasoning": "Clear and detailed product description, but lacks differentiation from competitors."
-         },
-         {
-           "query": "Who is the target customer for the company's product/service, and what problem does it solve for them?",
-           "response": "The target customers are small to medium-sized businesses (SMBs) looking to improve their data management and reporting capabilities.",
-           "weight": 0.1,
-           "score": 6,
-           "reasoning": "Well-defined target market, but lacks detail on the problem's significance."
-         },
-         // Continue for each query
-       ],
-       "total_weighted_score": 5.6 // Replace with calculated total score
-     }
-     ```
-
-5. **Detailed Analysis and Scoring**:
-   - **Review each query and response from the context**.
-   - **For each query**, fill in the following template:
-
-     ```json
-     {
-       "query": "[Insert query]",
-       "response": "[Insert response from context]",
-       "weight": [Insert weight],
-       "score": [Assign a score],
-       "reasoning": "[Provide a brief analysis of the response, highlighting any strengths, weaknesses, or risks that influenced your score.]"
-     }
-     ```
-
-6. **Calculate Weighted Scores**:
-   - **Weighted Score Calculation**: Multiply each score by its corresponding weight and sum these to get the total weighted score.
-     \[
-     \text{Total Score} = \sum (\text{Score}_i \times \text{Weight}_i)
-     \]
-   - **Add this total score to the JSON output**.
-
-7. **Example Output**:
-   - The final JSON should look like this:
-     ```json
-     {
-       "queries": [
-         {
-           "query": "What is the company's product/service, and what are its key features?",
-           "response": "The product is a cloud-based software solution that offers real-time data analytics and reporting features.",
-           "weight": 0.1,
-           "score": 7,
-           "reasoning": "Clear and detailed product description, but lacks differentiation from competitors."
-         },
-         {
-           "query": "Who is the target customer for the company's product/service, and what problem does it solve for them?",
-           "response": "The target customers are small to medium-sized businesses (SMBs) looking to improve their data management and reporting capabilities.",
-           "weight": 0.1,
-           "score": 6,
-           "reasoning": "Well-defined target market, but lacks detail on the problem's significance."
-         },
-         {
-           "query": "What are the company's revenue streams?",
-           "response": "The company generates revenue through subscription services, direct sales, and partnerships.",
-           "weight": 0.1,
-           "score": 5,
-           "reasoning": "Positive diversification of revenue streams, but lacks detailed information on scale and stability."
-         }
-         // Add other queries similarly
-       ],
-       "total_weighted_score": 5.6 // Replace with calculated total score
-     }
-     ```
-
-Take a deep breath and work on this problem step-by-step.
 """
 
 queries = [
@@ -825,28 +723,6 @@ async def process_queries(queries, pdf_content, file_name):
     return results
 
 
-def scoring_queries(queries, query_results):
-    combined_results = {q: r for q, r in zip(queries[:-4], query_results[:-4])}
-    message = f"CONTEXT:\n\n{json.dumps(combined_results, indent=4)}\n\n"
-    model = "llama3-70b-8192"
-    output = response(message=message, model=model, SysPrompt=ScoringPrompt, temperature=0)
-    json_part = extract_json(output)
-    final_json = json_part
-    return final_json
-
-
-def format_response_query(response):
-    """Format the response appropriately for HTML output."""
-    if isinstance(response, str):  # If the response is a plain string
-        return f"<pre>{mistune.html(response)}</pre>"
-    elif isinstance(response, list):  # If the response is a list
-        return "<ul>" + "".join(f"<li>{item}</li>" for item in response) + "</ul>"
-    elif isinstance(response, dict):  # If the response is a dictionary (JSON)
-        return json.dumps(response, indent=4)  # Convert to formatted JSON string
-    else:
-        return str(response)
-
-
 async def other_info(pdf_content, file_name):
     data = await industry(pdf_content, file_name)
     industry_company = data.get("industry")
@@ -868,230 +744,6 @@ async def other_info(pdf_content, file_name):
     print(results)
     return results
 
-
-def save_to_html(queries, query_results, grading_results, other_info_results, output_file):
-    html_content = """
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Query Responses</title>
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@100;200;300;400;500;600;700;800;900&display=swap" rel="stylesheet">
-        <style>
-            body {
-                font-family: 'Poppins', sans-serif;
-                background-color: #f9f9f9;
-                font-size: 18px; /* Increase font size */
-            }
-            h1 {
-                font-size: 40px; /* Increase font size */
-                color: black;
-                font-weight: 500;
-                padding: 0px 0px 15px 0px;
-                text-align: center;
-                margin-bottom: 40px;
-            }
-            h2 {
-                font-size: 30px; /* Increase font size */
-                color: black;
-                padding: 10px 0px 10px 0px;
-                border-bottom: 2px solid #4CAF50;
-                margin-top: 40px;
-            }
-            h3 {
-                color: black;
-                font-size: 28px; /* Increase font size */
-                font-weight: 500;
-                padding: 10px 0px 10px 0px;
-            }
-            h4 {
-                color: black;
-                font-size: 24px; /* Increase font size */
-                padding: 5px 0px 5px 0px;
-            }
-            p {
-                color: black;
-                padding: 5px 0px 5px 0px;
-                font-size: 18px; /* Increase font size */
-            }
-            strong {
-                font-weight: 500;
-            }
-            li {
-                color: black;
-                display: flex;
-                gap: 10px;
-                padding: 0px 0px 0px 15px;
-                font-size: 18px; /* Increase font size */
-            }
-            li strong {
-                min-width: 300px;
-                margin-right: 10px;
-            }
-            table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-bottom: 20px;
-                background-color: #ffffff;
-                border-radius: 8px;
-                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-                margin-top: 20px;
-                font-size: 18px; /* Increase font size */
-            }
-            th, td {
-                text-align: left;
-                padding: 10px;
-                border: 1px solid #ddd;
-                vertical-align: top;
-            }
-            th {
-                background-color: #4CAF50;
-                color: white;
-                text-align: center;
-                font-size: 1.5em; /* Increase font size */
-                border-top-left-radius: 10px;
-                border-top-right-radius: 10px;
-            }
-            td {
-                border-bottom-left-radius: 10px;
-                border-bottom-right-radius: 10px;
-                white-space: pre-wrap;
-                word-wrap: break-word;
-            }
-            tr {
-                border-bottom: 1px solid #D4D4D4;
-            }
-            tr:nth-child(even) {
-                background-color: #f2f2f2;
-            }
-            .summary {
-                background-color: #ffffff;
-                padding: 20px;
-                border-radius: 8px;
-                box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-                margin-bottom: 20px;
-            }
-            .response {
-                white-space: pre-wrap;
-            }
-            ul {
-                display: flex;
-                flex-direction: column;
-            }
-            .links {
-                display: flex;
-                flex-direction: column;
-            }
-            summary {
-                width: 100%;
-                border: 1px solid #ddd;
-                margin-bottom: 10px;
-                background-color: #ffffff;
-                padding: 10px;
-                border-radius: 8px;
-            }
-            .section-divider {
-                border-top: 2px solid #4CAF50;
-                margin: 40px 0;
-            }
-        </style>
-    </head>
-    <body style="page-break-before: always;">
-        <h1>Query Responses</h1>
-        <table>
-            <tr>
-                <th class="question">Query</th>
-                <th>Answer</th>
-            </tr>
-    """
-
-    # Add query responses
-    for query, response in zip(queries, query_results):
-        html_response = format_response_query(response)
-        html_content += f"""
-            <tr>
-                <td class="question">{query}</td>
-                <td class="response">{html_response}</td>
-            </tr>
-        """
-
-    html_content += """
-        </table>
-    """
-
-    # Add other information sections
-    for category, response in other_info_results.items():
-        html_response = format_response_query(response)
-        html_content += f"""
-        <div class="section-divider"></div>
-        <h2>{category}</h2>
-        <div class="response">{html_response}</div>
-        """
-
-    # Add grading results table
-    html_content += """
-        <div class="section-divider"></div>
-        <h2>Grading Results</h2>
-        <table>
-            <tr>
-                <th>Section</th>
-                <th>Score</th>
-                <th>Weight</th>
-                <th>Reasoning</th>
-            </tr>
-    """
-
-    for section_data in grading_results['sections']:
-        html_content += f"""
-            <tr>
-                <td>{section_data['section']}</td>
-                <td>{section_data['score']}</td>
-                <td>{section_data['weight']}</td>
-                <td>{section_data['reasoning']}</td>
-            </tr>
-        """
-
-    html_content += """
-        </table>
-    """
-
-    html_content += f"""
-        <div class="section-divider"></div>
-        <h3>Overall Score</h3>
-        <p>{grading_results['overall_score']}</p>
-    """
-
-    html_content += """
-        </body>
-        </html>
-        """
-
-    # Write HTML content to file
-    with open(output_file, 'w') as file:
-        file.write(html_content)
-    return output_file
-
-
-def convert_html_to_pdf(html_file, pdf_file):
-    options = {
-        "enable-local-file-access": "",
-        'encoding': "UTF-8",
-        'print-media-type': '',
-        'page-width': '3000px',  # Increase page width to accommodate horizontal scroll
-        'page-height': '1000px', # Adjust height as necessary
-        'margin-top': '5mm',
-        'margin-bottom': '5mm',
-        'margin-left': '5mm',
-        'margin-right': '5mm',
-        'zoom': '1.5'
-    }
-    try:
-        pdfkit.from_file(html_file, pdf_file, options=options)
-    except IOError as e:
-        pass
 
 
 # Main function adapted for Streamlit
@@ -1126,7 +778,6 @@ async def main(file_path, progress_callback=None):
         progress_callback("", 0)
 
 
-
     return queries, query_results, other_info_results, grading_results
 
 
@@ -1135,7 +786,3 @@ if __name__ == "__main__":
     file_path = input("Enter the path to the PDF file: ")
     loop = asyncio.get_event_loop()
     results = loop.run_until_complete(main(file_path))
-
-
-
-
