@@ -3,7 +3,7 @@ import asyncio
 import pandas as pd
 import os
 from image import main as process_pdf
-from image import save_to_html,convert_html_to_pdf
+from pdf import create_pdf
 
 st.set_page_config(layout="wide")
 
@@ -70,6 +70,9 @@ def streamlit_main():
     uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
     if uploaded_file is not None:
+        st.session_state.results = None
+        st.session_state.page = 0
+        st.session_state.progress_message = ""
         temp_file_path = f"/tmp/{uploaded_file.name}"
         with open(temp_file_path, "wb") as temp_file:
             temp_file.write(uploaded_file.getbuffer())
@@ -145,10 +148,9 @@ def streamlit_main():
             </style>
         """, unsafe_allow_html=True)
 
-        html_file = 'queries_responses.html'
+
         pdf_file = 'output.pdf'
-        save_to_html(queries, query_results, grading_results, other_info_results, html_file)
-        convert_html_to_pdf(html_file, pdf_file)
+        create_pdf(pdf_file, queries, query_results, other_info_results, grading_results)
 
         with open(pdf_file, "rb") as pdf_file:
             pdf_data = pdf_file.read()
