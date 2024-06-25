@@ -95,7 +95,7 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
         story.append(query)
         story.append(Spacer(1, 4))
 
-        query_html = markdown.markdown(query_results[idx], extensions=["tables"])
+        query_html = markdown.markdown(query_results[idx])
         query_content = Paragraph(query_html, html_style)
         story.append(query_content)
         story.append(Spacer(1, 4))
