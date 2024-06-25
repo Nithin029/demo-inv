@@ -183,7 +183,16 @@ Take a deep breath and work on this problem step-by-step.
 """
 
 queries = [
-    
+    "What is the company's product/service, and what are its key features?",
+    "Who is the target customer for the company's product/service, and what problem does it solve for them?",
+    "What are the company's revenue streams?",
+    "How does the company price its products/services?"
+    "What are the key cost drivers and profit margins for the company?",
+    "What opportunities for growth and expansion does the company foresee?",
+    "Who is the target market for the company's product/service, and how does the company plan to reach them?",
+    "What sales channels and distribution partnerships does the company have in place?",
+    "How is the company's marketing budget allocated?",
+    "What is the company's historical financial performance, including growth rate?",
     "What are the company's projected revenue, expenses, and profits for the future and cash flow projections?",
     "What is the founder's experience and track record, along with the key team members' bios, background checks, and their roles and responsibilities?",
     "How does the company's product/service differentiate itself from competitors in the market?",
