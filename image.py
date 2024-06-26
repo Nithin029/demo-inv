@@ -27,6 +27,7 @@ from PIL import PngImagePlugin  # important to avoid google_genai AttributeError
 import json
 import hashlib
 from dotenv import load_dotenv
+from classifier import Classifier
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 load_dotenv()
@@ -175,8 +176,8 @@ Your primary goal is to deliver an accurate, in-depth evaluation of the business
   ...
 }
 ```
-- Only use the KEYS (e.g., key1, key2) to identify the sections to be graded. Do not add or alter any sections beyond these specified keys. Grade only the sections that match the keys provided in the CONTEXT.
-
+- Only use the KEYS (e.g., key1, key2) to identify the sections to be graded. D0 NOT ADD or ALTER any sections beyond the KEYS present in the CONTEXT. Grade only the sections that match the KEYS provided in the CONTEXT.
+-If the CONTEXT has one or no KEY return a JSON with the 'keys are already graded'.
 Take a deep breath and work on this problem step-by-step.
 
 ---
@@ -259,20 +260,33 @@ def limit_tokens(input_string, token_limit=5500):
     return encoding.decode(encoding.encode(input_string)[:token_limit])
 
 
-def extract_image_content(pixmap: pymupdf.Pixmap, text: str) -> str:
+def extract_image_content(pixmap_list: List[pymupdf.Pixmap], text: str) -> List[str]:
     "Takes image path and extract information from it, and return it as text."
+
+    # Start Classifier inference session
+    classifier = Classifier("graph_classifierV2_B.onnx")
+    # Model for img to text
+    model = gemini.GenerativeModel("gemini-1.5-flash")
 
     description_prompt = f"You are provided with the images extracted from a pitch-deck and some text surrounding the image from the same pitch deck. Extract all the factual information that the image is trying to communicate through line charts, area line charts, bar charts, pie charts, tables exectra. Use OCR to extract numerical figures and include them in the information. If the image does not have any information like its a blank image or image of a person then response should be NOTHING. Do not add any additional comments or markdown, just give information. \n\n SURROUNDING TEXT \n\n{text}"
 
-    model = gemini.GenerativeModel("gemini-1.5-flash")
-    img = Image.frombytes(
-        mode="RGB", size=(pixmap.width, pixmap.height), data=pixmap.samples
-    )
+    img_list = [
+        Image.frombytes(
+            mode="RGB", size=(pixmap.width, pixmap.height), data=pixmap.samples
+        )
+        for pixmap in pixmap_list
+    ]
 
-    response = model.generate_content([description_prompt, img], stream=False)
-    # print(response.text)  # just to visualize what model is generating, can be commented
+    graph_image = classifier.classify([img_list])
+    response_list = []
+    for idx, is_graph in graph_image:
+        if is_graph:
+            response = model.generate_content(
+                [description_prompt, img_list[idx]], stream=False
+            )
+            response_list.append(str(response.text))
 
-    return response.text
+    return response_list
 
 
 def extract_content(pdf_content: bytes) -> List[Tuple[str, int]]:
@@ -586,7 +600,6 @@ async def web_search(question):
     else:
         return {"error": f"Failed to ask question: {response.status_code}"}
 
-
 def split_into_chunks(input_string, token_limit=4500):
     # Initialize the tokenizer for the model
     encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
@@ -620,6 +633,32 @@ def split_into_chunks(input_string, token_limit=4500):
 
     return chunks
 
+def further_split_chunk(chunk, token_limit):
+    encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+    tokens = encoding.encode(chunk)
+    sub_chunks = []
+    start = 0
+
+    while start < len(tokens):
+        end = start + token_limit
+        if end >= len(tokens):
+            sub_chunk_tokens = tokens[start:]
+        else:
+            break_point = end
+            while break_point > start and tokens[break_point] not in encoding.encode(" "):
+                break_point -= 1
+
+            if break_point == start:
+                sub_chunk_tokens = tokens[start:end]
+            else:
+                sub_chunk_tokens = tokens[start:break_point]
+                end = break_point
+
+        sub_chunk = encoding.decode(sub_chunk_tokens)
+        sub_chunks.append(sub_chunk)
+        start = end
+
+    return sub_chunks
 
 # Define the investment function
 def investment(queries, query_results, other_info_results):
@@ -631,49 +670,84 @@ def investment(queries, query_results, other_info_results):
         combined_results[key] = value.split('<details><summary>')[0].strip()
 
     message = f"CONTEXT:\n\n{json.dumps(combined_results, indent=4)}\n\n"
-    # print(combined_results)
+
     sys_prompt = Investment
     encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
     sys_prompt_token_size = len(encoding.encode(sys_prompt))
 
-    max_model_tokens = 5500
-    max_chunk_size = 5000  # Adjust to leave more buffer space
+    max_model_tokens = 5000
+    max_chunk_size = 4500  # Adjust to leave more buffer space
 
     chunks = split_into_chunks(message, token_limit=max_chunk_size)
 
     model = "llama3-70b-8192"
     responses = []
     tokens_used = 0
-    max_tokens_per_minute = 5500
+    max_tokens_per_minute = 6000
 
     for chunk in chunks:
+        chunk_token_size = len(encoding.encode(chunk))
         combined_message = f"{sys_prompt}\n{chunk}"
         combined_token_size = len(encoding.encode(combined_message))
 
         print(f"Token size of the combined message and SysPrompt for this chunk: {combined_token_size}")
-        print(f"Chunk token size: {len(encoding.encode(chunk))}")
+        print(f"Chunk token size: {chunk_token_size}")
         print(f"SysPrompt token size: {sys_prompt_token_size}")
 
         if combined_token_size > max_model_tokens:
-            print(
-                f"Warning: Combined token size ({combined_token_size}) exceeds the model's limit ({max_model_tokens}). Adjusting chunk size.")
-
-        response_str = response(message=chunk, model=model, SysPrompt=sys_prompt, temperature=0)
-        # print(response_str)
-        # Simulate response generation and track tokens used
-        json_part = extract_json(response_str)
-        if json_part:
-            json_part = json_part
+            print(f"Warning: Combined token size ({combined_token_size}) exceeds the model's limit ({max_model_tokens}). Adjusting chunk size.")
+            sub_chunks = further_split_chunk(chunk, max_model_tokens - sys_prompt_token_size)
+            for sub_chunk in sub_chunks:
+                sub_chunk_token_size = len(encoding.encode(sub_chunk))
+                print(sub_chunk_token_size)
+                if sub_chunk_token_size > 500:
+                    sub_combined_message = f"{sys_prompt}\n{sub_chunk}"
+                    sub_combined_token_size = len(encoding.encode(sub_combined_message))
+                    if sub_combined_token_size <= max_model_tokens:
+                        response_str = response(message=sub_chunk, model=model, SysPrompt=sys_prompt, temperature=0)
+                        print(response_str)
+                        json_part = extract_json(response_str)
+                        if json_part:
+                            responses.append(json_part)
+                        else:
+                            print("Warning: No valid JSON part found in the response.")
+                        tokens_used += sub_combined_token_size
+                        if tokens_used >= max_tokens_per_minute:
+                            print("Waiting for 60 seconds to avoid rate limit.")
+                            time.sleep(60)
+                            tokens_used = 0
         else:
-            print("Warning: No valid JSON part found in the response.")
+            if chunk_token_size >= 500:
+                response_str = response(message=chunk, model=model, SysPrompt=sys_prompt, temperature=0)
+                print(response_str)
+                json_part = extract_json(response_str)
+                if json_part:
+                    responses.append(json_part)
+                else:
+                    print("Warning: No valid JSON part found in the response.")
+                tokens_used += combined_token_size
+                if tokens_used >= max_tokens_per_minute:
+                    print("Waiting for 60 seconds to avoid rate limit.")
+                    time.sleep(60)
+                    tokens_used = 0
 
-        # Track tokens used and add delay to avoid rate limit
-        tokens_used += combined_token_size
-        print("Waiting for 60 seconds to avoid rate limit.")
-        time.sleep(60)  # Wait for 60 seconds after each request
+    combined_json = {
+        "sectors": [],
+        "final_score": 0
+    }
+    total_score = 0
+    count = 0
 
-    final_json = json_part
-    # print(final_json)
+    for response_str in responses:
+        response_json = json.loads(response_str)
+        combined_json["sectors"].append(response_json)
+        total_score += response_json["overall_score"]
+        count += 1
+
+    if count > 0:
+        combined_json["final_score"] = total_score / count
+    final_json = json.dumps(combined_json, indent=4)
+    print(final_json)
     return final_json
 
 
@@ -786,3 +860,7 @@ if __name__ == "__main__":
     file_path = input("Enter the path to the PDF file: ")
     loop = asyncio.get_event_loop()
     results = loop.run_until_complete(main(file_path))
+
+
+
+
