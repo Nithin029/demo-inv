@@ -95,7 +95,7 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
         story.append(query)
         story.append(Spacer(1, 4))
 
-        query_html = markdown.markdown(query_results[idx])
+        query_html = markdown.markdown(query_results[idx], extensions=["tables"])
         query_content = Paragraph(query_html, html_style)
         story.append(query_content)
         story.append(Spacer(1, 4))
@@ -166,7 +166,7 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
 
     # Convert grading results to table format
     df = {"Area/Section": [], "Score": [], "Weightage": [], "Reasoning": []}
-    for datapoint in grading_results["sections"]:
+    for datapoint in grading_results["sectors"][0]["sections"]:
         df["Area/Section"].append(datapoint["section"])
         df["Score"].append(datapoint["score"])
         df["Weightage"].append(datapoint["weight"])
@@ -199,7 +199,7 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
         textColor=colors.red,
     )
     final_score = Paragraph(
-        f"{grading_results['overall_score']}", custom_style
+        f"{grading_results['final_score']}", custom_style
     )
     story.append(final_score)
 
