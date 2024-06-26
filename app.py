@@ -14,6 +14,8 @@ if 'results' not in st.session_state:
     st.session_state.results = None
 if 'progress_message' not in st.session_state:
     st.session_state.progress_message = ""
+if 'pdf_ready' not in st.session_state:
+    st.session_state.pdf_ready = False
 
 # Define display functions for each section
 def display_queries_and_answers(queries, query_results):
@@ -76,6 +78,8 @@ def streamlit_main():
         st.session_state.results = None
         st.session_state.page = 0
         st.session_state.progress_message = ""
+        st.session_state.pdf_ready = False  # Reset PDF ready state when a new file is uploaded
+
         temp_file_path = f"/tmp/{uploaded_file.name}"
         with open(temp_file_path, "wb") as temp_file:
             temp_file.write(uploaded_file.getbuffer())
@@ -151,20 +155,22 @@ def streamlit_main():
             </style>
         """, unsafe_allow_html=True)
 
-        # Ensure PDF creation is not part of the page update process
-        if st.button("Download PDF"):
+        # Ensure PDF creation is only triggered once and the state is managed
+        if not st.session_state.pdf_ready:
             pdf_file = 'output.pdf'
             create_pdf(pdf_file, queries, query_results, other_info_results, grading_results)
+            st.session_state.pdf_ready = True
 
-            with open(pdf_file, "rb") as pdf_file:
-                pdf_data = pdf_file.read()
+        # Display the download button
+        with open('output.pdf', "rb") as pdf_file:
+            pdf_data = pdf_file.read()
 
-            st.download_button(
-                label="Download PDF",
-                data=pdf_data,
-                file_name="output.pdf",
-                mime="application/pdf",
-            )
+        st.download_button(
+            label="Download PDF",
+            data=pdf_data,
+            file_name="output.pdf",
+            mime="application/pdf",
+        )
 
 if __name__ == "__main__":
     streamlit_main()
