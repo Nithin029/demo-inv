@@ -64,6 +64,9 @@ def display_grading_results(grading_results):
 def change_page(step):
     st.session_state.page += step
 
+async def process_pdf_with_progress(file_path, progress_callback):
+    return await process_pdf(file_path, progress_callback)
+
 def streamlit_main():
     st.title("Pitch Deck Analysis")
 
@@ -148,22 +151,20 @@ def streamlit_main():
             </style>
         """, unsafe_allow_html=True)
 
+        # Ensure PDF creation is not part of the page update process
+        if st.button("Download PDF"):
+            pdf_file = 'output.pdf'
+            create_pdf(pdf_file, queries, query_results, other_info_results, grading_results)
 
-        pdf_file = 'output.pdf'
-        create_pdf(pdf_file, queries, query_results, other_info_results, grading_results)
+            with open(pdf_file, "rb") as pdf_file:
+                pdf_data = pdf_file.read()
 
-        with open(pdf_file, "rb") as pdf_file:
-            pdf_data = pdf_file.read()
-
-        st.download_button(
-            label="Download PDF",
-            data=pdf_data,
-            file_name="output.pdf",
-            mime="application/pdf",
-        )
-
-async def process_pdf_with_progress(file_path, progress_callback):
-    return await process_pdf(file_path, progress_callback)
+            st.download_button(
+                label="Download PDF",
+                data=pdf_data,
+                file_name="output.pdf",
+                mime="application/pdf",
+            )
 
 if __name__ == "__main__":
     streamlit_main()
