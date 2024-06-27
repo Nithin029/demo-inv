@@ -149,19 +149,7 @@ def streamlit_main():
             </style>
         """, unsafe_allow_html=True)
 
-        pdf_file = 'output.pdf'
-        create_pdf(pdf_file, queries, query_results, other_info_results, grading_results)
-
-        with open(pdf_file, "rb") as pdf_file:
-            pdf_data = pdf_file.read()
-
-        st.download_button(
-            label="Download PDF",
-            data=pdf_data,
-            file_name="output.pdf",
-            mime="application/pdf",
-        )
-
+       
 async def process_pdf_with_progress(file_path, progress_callback):
     return await process_pdf(file_path, progress_callback)
 
