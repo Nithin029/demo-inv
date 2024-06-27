@@ -79,29 +79,30 @@ def streamlit_main():
         st.session_state.uploaded_file_name = uploaded_file.name
 
         # Clear previous results if a new file is uploaded
-        if st.session_state.results is not None:
-            st.session_state.results = None
+        st.session_state.results = None
+        st.session_state.page = 0
+
         if st.session_state.results is None:
             progress_bar = st.empty()
             progress_text = st.empty()
 
-        def progress_callback(stage, progress):
-            if stage:
-                progress_text.text(stage)
-                progress_bar.progress(progress)
-            else:
-                progress_text.empty()
-                progress_bar.empty()
+            def progress_callback(stage, progress):
+                if stage:
+                    progress_text.text(stage)
+                    progress_bar.progress(progress)
+                else:
+                    progress_text.empty()
+                    progress_bar.empty()
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        results = loop.run_until_complete(process_pdf_with_progress(temp_file_path, progress_callback))
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            results = loop.run_until_complete(process_pdf_with_progress(temp_file_path, progress_callback))
 
-        if results is None:
-            st.error("File not found or could not be processed.")
-            return
+            if results is None:
+                st.error("File not found or could not be processed.")
+                return
 
-        st.session_state.results = results
+            st.session_state.results = results
 
     if st.session_state.results is not None:
         queries, query_results, other_info_results, grading_results = st.session_state.results
