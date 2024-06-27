@@ -14,6 +14,8 @@ if 'results' not in st.session_state:
     st.session_state.results = None
 if 'progress_message' not in st.session_state:
     st.session_state.progress_message = ""
+if 'uploaded_file_name' not in st.session_state:
+    st.session_state.uploaded_file_name = ""
 
 # Define display functions for each section
 def display_queries_and_answers(queries, query_results):
@@ -49,7 +51,7 @@ def display_grading_results(grading_results):
 
     gr = grading_results
 
-    for datapoint in gr['sectors'][0]['sector']:
+    for datapoint in gr["sectors"][0]["sections"]:
         df["Area/Section"].append(datapoint["section"])
         df["Score"].append(datapoint["score"])
         df["Weightage"].append(datapoint["weight"])
@@ -59,7 +61,7 @@ def display_grading_results(grading_results):
 
     st.header(f"Industry: {gr['sectors'][0]['sector']}")
     st.table(data=grading_df)
-    st.subheader(f"Estimated score: {gr['overall_score']}")
+    st.subheader(f"Estimated score: {gr['final_score']}")
 
 def change_page(step):
     st.session_state.page += step
@@ -69,33 +71,39 @@ def streamlit_main():
 
     uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
-    if uploaded_file is not None:
+    if uploaded_file is not None and uploaded_file.name != st.session_state.uploaded_file_name:
         temp_file_path = f"/tmp/{uploaded_file.name}"
         with open(temp_file_path, "wb") as temp_file:
             temp_file.write(uploaded_file.getbuffer())
 
+        st.session_state.uploaded_file_name = uploaded_file.name
+
+        # Clear previous results if a new file is uploaded
+        if st.session_state.results is not None:
+            st.session_state.results = None
         if st.session_state.results is None:
             progress_bar = st.empty()
             progress_text = st.empty()
 
-            def progress_callback(stage, progress):
-                if stage:
-                    progress_text.text(stage)
-                    progress_bar.progress(progress)
-                else:
-                    progress_text.empty()
-                    progress_bar.empty()
+        def progress_callback(stage, progress):
+            if stage:
+                progress_text.text(stage)
+                progress_bar.progress(progress)
+            else:
+                progress_text.empty()
+                progress_bar.empty()
 
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            results = loop.run_until_complete(process_pdf_with_progress(temp_file_path, progress_callback))
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        results = loop.run_until_complete(process_pdf_with_progress(temp_file_path, progress_callback))
 
-            if results is None:
-                st.error("File not found or could not be processed.")
-                return
+        if results is None:
+            st.error("File not found or could not be processed.")
+            return
 
-            st.session_state.results = results
+        st.session_state.results = results
 
+    if st.session_state.results is not None:
         queries, query_results, other_info_results, grading_results = st.session_state.results
 
         col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
@@ -144,6 +152,19 @@ def streamlit_main():
             }
             </style>
         """, unsafe_allow_html=True)
+
+        pdf_file = 'output.pdf'
+        create_pdf(pdf_file, queries, query_results, other_info_results, grading_results)
+
+        with open(pdf_file, "rb") as pdf_file:
+            pdf_data = pdf_file.read()
+
+        st.download_button(
+            label="Download PDF",
+            data=pdf_data,
+            file_name="output.pdf",
+            mime="application/pdf",
+        )
 
 async def process_pdf_with_progress(file_path, progress_callback):
     return await process_pdf(file_path, progress_callback)
