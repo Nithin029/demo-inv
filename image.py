@@ -32,12 +32,11 @@ from tenacity import retry, stop_after_attempt, wait_random_exponential
 
 load_dotenv()
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-HELICON_API_KEY = os.getenv("HELICON_API_KEY")
 TOGETHER_API_KEY = os.getenv("TOGETHER_API")
 GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
 COHERE_API = os.getenv("COHERE_API")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 gemini.configure(api_key=GEMINI_API_KEY)
 
@@ -208,18 +207,15 @@ def get_digest(pdf_content):
     return h.hexdigest()
 
 
-def response(message: object, model: object = "llama3-8b-8192", SysPrompt: object = SysPromptDefault,
+def response(message: object, model: object = "meta-llama/llama-3-70b-instruct:nitro", SysPrompt: object = SysPromptDefault,
              temperature: object = 0.2) -> object:
     """
     :rtype: object
     """
     client = openai.OpenAI(
-        api_key=GROQ_API_KEY,
-        base_url="https://gateway.hconeai.com/openai/v1",
-        default_headers={
-            "Helicone-Auth": f"Bearer {HELICON_API_KEY}",
-            "Helicone-Target-Url": "https://api.groq.com"
-        }
+        api_key=OPENROUTER_API_KEY,
+        base_url="https://openrouter.ai/api/v1",
+
     )
 
     messages = [{"role": "system", "content": SysPrompt}, {"role": "user", "content": message}]
@@ -569,7 +565,7 @@ async def industry(pdf_content, file_name):
     docs = await get_docs(question, pdf_content, file_name)
     context = "\n\n".join(docs)
     message = f"CONTEXT\n\n{context}\n\n"
-    model = "llama3-70b-8192"
+    model = "meta-llama/llama-3-70b-instruct:nitro"
     response_str = response(message=message, model=model, SysPrompt=IndustryPrompt, temperature=0)
     industry = json.loads(response_str)
     print(industry)
@@ -680,7 +676,7 @@ def investment(queries, query_results, other_info_results):
 
     chunks = split_into_chunks(message, token_limit=max_chunk_size)
 
-    model = "llama3-70b-8192"
+    model = "meta-llama/llama-3-70b-instruct:nitro"
     responses = []
     tokens_used = 0
     max_tokens_per_minute = 6000
@@ -768,7 +764,7 @@ async def answer(question, pdf_content, file_name):
     docs = await get_docs(question, pdf_content, file_name)
     context = "\n\n".join(docs)
     message = f"CONTEXT:\n\n{context}\n\nQUESTION :\n\n{question}\n\n"
-    model = "llama3-70b-8192"
+    model = "meta-llama/llama-3-70b-instruct:nitro"
     response_str = response(message=message, model=model, SysPrompt=QuestionRouter, temperature=0)
     print(response_str)
     source = json.loads(response_str)
@@ -777,24 +773,24 @@ async def answer(question, pdf_content, file_name):
         print("---ROUTE QUESTION TO RAG---")
         data_source = "vectorstore"
         message = f"CONTEXT:\n\n{context}\n\nQUESTION:\n\n{question}\n\nANSWER:\n"
-        model = "llama3-70b-8192"
+        model = "meta-llama/llama-3-70b-instruct:nitro"
         output = response(message=message, model=model, SysPrompt=GenerationPrompt, temperature=0)
     elif source["datasource"].lower() == "missing_information":
         print("---NO SUFFICIENT INFORMATION---")
         data_source = "missing information"
         message = f"CONTEXT:\n\n{context}\n\nQUESTION:\n\n{question}\n\nANSWER:\n"
-        model = "llama3-70b-8192"
+        model = "meta-llama/llama-3-70b-instruct:nitro"
         output = response(message=message, model=model, SysPrompt=MissingInformation, temperature=0)
 
     return output
 
 
 async def process_queries(queries, pdf_content, file_name):
-    results = []
-    for query in queries:
-        response = await answer(query, pdf_content, file_name)
-        results.append((response))
+    # Run the `answer` function concurrently for all queries
+    tasks = [answer(query, pdf_content, file_name) for query in queries]
+    results = await asyncio.gather(*tasks)
     return results
+
 
 
 async def other_info(pdf_content, file_name):
@@ -860,6 +856,7 @@ if __name__ == "__main__":
     file_path = input("Enter the path to the PDF file: ")
     loop = asyncio.get_event_loop()
     results = loop.run_until_complete(main(file_path))
+
 
 
 
