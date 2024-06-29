@@ -29,6 +29,7 @@ import hashlib
 from dotenv import load_dotenv
 from classifier import Classifier
 from tenacity import retry, stop_after_attempt, wait_random_exponential
+import aiohttp
 
 load_dotenv()
 
@@ -40,9 +41,7 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 gemini.configure(api_key=GEMINI_API_KEY)
 
-client = openai.OpenAI(
-    base_url="https://api.together.xyz/v1", api_key=TOGETHER_API_KEY
-)
+client = openai.OpenAI(base_url="https://api.together.xyz/v1", api_key=TOGETHER_API_KEY)
 
 SysPromptDefault = "You are now in the role of an expert AI."
 GenerationPrompt = """You are an expert AI whose task is to ANSWER the user's QUESTION using the provided CONTEXT.
@@ -196,8 +195,7 @@ queries = [
     "What are the company's projected revenue, expenses, and profits for the future and cash flow projections?",
     "What is the founder's experience and track record, along with the key team members' bios, background checks, and their roles and responsibilities?",
     "How does the company's product/service differentiate itself from competitors in the market?",
-    "What issue or challenge is the company addressing?"
-
+    "What issue or challenge is the company addressing?",
 ]
 
 
@@ -207,21 +205,28 @@ def get_digest(pdf_content):
     return h.hexdigest()
 
 
-def response(message: object, model: object = "meta-llama/llama-3-70b-instruct:nitro", SysPrompt: object = SysPromptDefault,
-             temperature: object = 0.2) -> object:
+def response(
+    message: object,
+    model: object = "meta-llama/llama-3-70b-instruct:nitro",
+    SysPrompt: object = SysPromptDefault,
+    temperature: object = 0.2,
+) -> object:
     """
     :rtype: object
     """
     client = openai.OpenAI(
         api_key=OPENROUTER_API_KEY,
         base_url="https://openrouter.ai/api/v1",
-
     )
 
-    messages = [{"role": "system", "content": SysPrompt}, {"role": "user", "content": message}]
+    messages = [
+        {"role": "system", "content": SysPrompt},
+        {"role": "user", "content": message},
+    ]
 
     @retry(wait=wait_random_exponential(min=1, max=10), stop=stop_after_attempt(6))
     def completion_with_backoff(**kwargs):
+        print("RETRY")
         return client.chat.completions.create(**kwargs)
 
     try:
@@ -266,15 +271,22 @@ def extract_image_content(pixmap_list: List[pymupdf.Pixmap], text: str) -> List[
 
     description_prompt = f"You are provided with the images extracted from a pitch-deck and some text surrounding the image from the same pitch deck. Extract all the factual information that the image is trying to communicate through line charts, area line charts, bar charts, pie charts, tables exectra. Use OCR to extract numerical figures and include them in the information. If the image does not have any information like its a blank image or image of a person then response should be NOTHING. Do not add any additional comments or markdown, just give information. \n\n SURROUNDING TEXT \n\n{text}"
 
-    img_list = [
-        Image.frombytes(
-            mode="RGB", size=(pixmap.width, pixmap.height), data=pixmap.samples
-        )
-        for pixmap in pixmap_list
-    ]
+    img_list = []
 
-    graph_image = classifier.classify([img_list])
+    for pixmap in pixmap_list:
+        try:
+            img_list.append(
+                Image.frombytes(
+                    mode="RGB", size=(pixmap.width, pixmap.height), data=pixmap.samples
+                )
+            )
+        except Exception as e:
+            print(e)
+
+    graph_image = classifier.classify(img_list)
+
     response_list = []
+
     for idx, is_graph in graph_image:
         if is_graph:
             response = model.generate_content(
@@ -305,19 +317,22 @@ def extract_content(pdf_content: bytes) -> List[Tuple[str, int]]:
 
         # extracting image content
         image_list = page.get_image_info(xrefs=True)
+        pixmap_list = []
         for img_info in image_list:
             xref = img_info["xref"]
             if xref not in refered_xref:
                 # if xref not in refered_xref:
                 try:
                     img_pixmap = pymupdf.Pixmap(pdf_doc, xref)
-                    img_content = extract_image_content(
-                        pixmap=img_pixmap, text=text_content.replace("\n", "\t")
-                    )
-                    page_content = page_content + "\n\n" + str(img_content)
+                    pixmap_list.append(img_pixmap)
                     refered_xref.append(xref)
                 except ValueError as e:
                     print(f"Skipping image with due to error: {e}")
+
+        img_content = extract_image_content(
+            pixmap_list=pixmap_list, text=text_content.replace("\n", "\t")
+        )
+        page_content = page_content + "\n\n" + "\n\n".join(img_content)
 
         pages_content.append(page_content)
 
@@ -347,14 +362,14 @@ def extract_content(pdf_content: bytes) -> List[Tuple[str, int]]:
 
 
 def markdown(output):
-    report_html = output.get('report', '')
-    references = output.get('references', {})
+    report_html = output.get("report", "")
+    references = output.get("references", {})
     references_markdown = ""
 
     for url, content in references.items():
         # Making the URL clickable in pure HTML
         clickable_url = f'<a href="{url}">{url}</a>'
-        references_markdown += f'<details><summary>{clickable_url}</summary>\n\n{html2text.html2text(content)}</details>\n\n'
+        references_markdown += f"<details><summary>{clickable_url}</summary>\n\n{html2text.html2text(content)}</details>\n\n"
 
     combined_markdown = ""
     if report_html.strip():  # Check if report_html is not empty
@@ -365,16 +380,13 @@ def markdown(output):
 
 def pinecone_server():
     pc = Pinecone(api_key=PINECONE_API_KEY)
-    index_name = 'investment'
+    index_name = "investment"
     if index_name not in pc.list_indexes().names():
         pc.create_index(
             index_name,
             dimension=1024,
-            metric='cosine',
-            spec=ServerlessSpec(
-                cloud='aws',
-                region='us-east-1'
-            )
+            metric="cosine",
+            spec=ServerlessSpec(cloud="aws", region="us-east-1"),
         )
         time.sleep(1)
     index = pc.Index(index_name)
@@ -388,24 +400,24 @@ def fetch_vectorstore_from_db(file_id):
         user="postgres.kstfnkkxavowoutfytoq",
         password="nI20th0in3@",
         host="aws-0-us-east-1.pooler.supabase.com",
-        port="5432"
+        port="5432",
     )
     cur = conn.cursor()
-    create_table_query = '''
+    create_table_query = """
         CREATE TABLE IF NOT EXISTS investment_research_pro (
             file_id VARCHAR(1024) PRIMARY KEY,
             file_name VARCHAR(1024),
             name_space VARCHAR(1024)
 
         );
-    '''
+    """
     cur.execute(create_table_query)
     conn.commit()
-    fetch_query = '''
+    fetch_query = """
     SELECT name_space
     FROM investment_research_pro
     WHERE file_id = %s;
-    '''
+    """
     cur.execute(fetch_query, (file_id,))
     result = cur.fetchone()
     cur.close()
@@ -421,7 +433,7 @@ def get_next_namespace():
         user="postgres.kstfnkkxavowoutfytoq",
         password="nI20th0in3@",
         host="aws-0-us-east-1.pooler.supabase.com",
-        port="5432"
+        port="5432",
     )
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) FROM investment_research_pro")
@@ -438,23 +450,23 @@ def insert_data(file_id, file_name, name_space):
         user="postgres.kstfnkkxavowoutfytoq",
         password="nI20th0in3@",
         host="aws-0-us-east-1.pooler.supabase.com",
-        port="5432"
+        port="5432",
     )
     cur = conn.cursor()
-    create_table_query = '''
+    create_table_query = """
     CREATE TABLE IF NOT EXISTS investment_research_pro (
         file_id VARCHAR(1024) PRIMARY KEY,
         file_name VARCHAR(1024),
         name_space VARCHAR(255)
     );
-    '''
+    """
     cur.execute(create_table_query)
     conn.commit()
-    insert_query = '''
+    insert_query = """
     INSERT INTO investment_research_pro (file_id, file_name, name_space)
     VALUES (%s, %s, %s)
     ON CONFLICT (file_id) DO NOTHING;
-    '''
+    """
     cur.execute(insert_query, (file_id, file_name, name_space))
     conn.commit()
     cur.close()
@@ -466,11 +478,8 @@ def create_documents(page_contents):
 
     for content, page_number in page_contents:
         doc = {
-            'page_content': content,
-            'metadata': {
-                'page_number': page_number,
-                'original_content': content
-            }
+            "page_content": content,
+            "metadata": {"page_number": page_number, "original_content": content},
         }
         documents.append(doc)
 
@@ -478,7 +487,7 @@ def create_documents(page_contents):
 
 
 async def embed_and_upsert(documents, name_space):
-    chunks = [doc['page_content'] for doc in documents]
+    chunks = [doc["page_content"] for doc in documents]
     pinecone_index = pinecone_server()
     embeddings_response = client.embeddings.create(
         input=chunks, model="BAAI/bge-large-en-v1.5"
@@ -487,11 +496,9 @@ async def embed_and_upsert(documents, name_space):
     pinecone_data = []
     for doc, embedding in zip(documents, embeddings):
         i = str(uuid.uuid4())
-        pinecone_data.append({
-            'id': i,
-            'values': embedding,
-            'metadata': doc['metadata']
-        })
+        pinecone_data.append(
+            {"id": i, "values": embedding, "metadata": doc["metadata"]}
+        )
 
     pinecone_index.upsert(vectors=pinecone_data, namespace=name_space)
 
@@ -549,52 +556,34 @@ async def get_docs(question, pdf_content, file_name):
     # print(name_space)
     res = index.query(namespace=name_space, vector=xq, top_k=5, include_metadata=True)
     print(res)
-    docs = [x["metadata"]['original_content'] for x in res["matches"]]
+    docs = [x["metadata"]["original_content"] for x in res["matches"]]
 
     if not docs:
         print("No matching documents found.")
         return []
 
-    results = co.rerank(query=question, documents=docs, top_n=3, model='rerank-english-v3.0')
+    results = co.rerank(
+        query=question, documents=docs, top_n=3, model="rerank-english-v3.0"
+    )
     reranked_docs = process_rerank_response(results, docs)
     return reranked_docs
 
 
 async def industry(pdf_content, file_name):
-    question = "What is the name and its specific niche business this document pertains to."
+    question = (
+        "What is the name and its specific niche business this document pertains to."
+    )
     docs = await get_docs(question, pdf_content, file_name)
     context = "\n\n".join(docs)
     message = f"CONTEXT\n\n{context}\n\n"
     model = "meta-llama/llama-3-70b-instruct:nitro"
-    response_str = response(message=message, model=model, SysPrompt=IndustryPrompt, temperature=0)
+    response_str = response(
+        message=message, model=model, SysPrompt=IndustryPrompt, temperature=0
+    )
     industry = json.loads(response_str)
     print(industry)
     return industry
 
-
-async def web_search(question):
-    data = {
-        "topic": "",
-        "description": question,
-        "user_id": "",
-        "user_name": "",
-        "internet": True,
-        "output_format": "report_table",
-        "data_format": "No presets",
-    }
-    response = requests.post(
-        f"https://pvanand-search-generate-staging.hf.space/generate_report",
-        json=data,
-        headers={"Content-Type": "application/json"},
-    )
-    if response.status_code == 200:
-        try:
-            result = response.json()
-            return result
-        except requests.exceptions.JSONDecodeError:
-            return {"error": "Failed to decode JSON response"}
-    else:
-        return {"error": f"Failed to ask question: {response.status_code}"}
 
 def split_into_chunks(input_string, token_limit=4500):
     # Initialize the tokenizer for the model
@@ -614,7 +603,9 @@ def split_into_chunks(input_string, token_limit=4500):
             chunk_tokens = tokens[start:]
         else:
             break_point = end
-            while break_point > start and tokens[break_point] not in encoding.encode(" "):
+            while break_point > start and tokens[break_point] not in encoding.encode(
+                " "
+            ):
                 break_point -= 1
 
             if break_point == start:
@@ -629,6 +620,7 @@ def split_into_chunks(input_string, token_limit=4500):
 
     return chunks
 
+
 def further_split_chunk(chunk, token_limit):
     encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
     tokens = encoding.encode(chunk)
@@ -641,7 +633,9 @@ def further_split_chunk(chunk, token_limit):
             sub_chunk_tokens = tokens[start:]
         else:
             break_point = end
-            while break_point > start and tokens[break_point] not in encoding.encode(" "):
+            while break_point > start and tokens[break_point] not in encoding.encode(
+                " "
+            ):
                 break_point -= 1
 
             if break_point == start:
@@ -656,6 +650,7 @@ def further_split_chunk(chunk, token_limit):
 
     return sub_chunks
 
+
 # Define the investment function
 def investment(queries, query_results, other_info_results):
     # Combine queries and query_results into a dictionary
@@ -663,7 +658,7 @@ def investment(queries, query_results, other_info_results):
 
     # Extract keys and answers from the other_info_results and update the combined_results dictionary
     for key, value in other_info_results.items():
-        combined_results[key] = value.split('<details><summary>')[0].strip()
+        combined_results[key] = value.split("<details><summary>")[0].strip()
 
     message = f"CONTEXT:\n\n{json.dumps(combined_results, indent=4)}\n\n"
 
@@ -686,13 +681,19 @@ def investment(queries, query_results, other_info_results):
         combined_message = f"{sys_prompt}\n{chunk}"
         combined_token_size = len(encoding.encode(combined_message))
 
-        print(f"Token size of the combined message and SysPrompt for this chunk: {combined_token_size}")
+        print(
+            f"Token size of the combined message and SysPrompt for this chunk: {combined_token_size}"
+        )
         print(f"Chunk token size: {chunk_token_size}")
         print(f"SysPrompt token size: {sys_prompt_token_size}")
 
         if combined_token_size > max_model_tokens:
-            print(f"Warning: Combined token size ({combined_token_size}) exceeds the model's limit ({max_model_tokens}). Adjusting chunk size.")
-            sub_chunks = further_split_chunk(chunk, max_model_tokens - sys_prompt_token_size)
+            print(
+                f"Warning: Combined token size ({combined_token_size}) exceeds the model's limit ({max_model_tokens}). Adjusting chunk size."
+            )
+            sub_chunks = further_split_chunk(
+                chunk, max_model_tokens - sys_prompt_token_size
+            )
             for sub_chunk in sub_chunks:
                 sub_chunk_token_size = len(encoding.encode(sub_chunk))
                 print(sub_chunk_token_size)
@@ -700,7 +701,12 @@ def investment(queries, query_results, other_info_results):
                     sub_combined_message = f"{sys_prompt}\n{sub_chunk}"
                     sub_combined_token_size = len(encoding.encode(sub_combined_message))
                     if sub_combined_token_size <= max_model_tokens:
-                        response_str = response(message=sub_chunk, model=model, SysPrompt=sys_prompt, temperature=0)
+                        response_str = response(
+                            message=sub_chunk,
+                            model=model,
+                            SysPrompt=sys_prompt,
+                            temperature=0,
+                        )
                         print(response_str)
                         json_part = extract_json(response_str)
                         if json_part:
@@ -714,7 +720,9 @@ def investment(queries, query_results, other_info_results):
                             tokens_used = 0
         else:
             if chunk_token_size >= 500:
-                response_str = response(message=chunk, model=model, SysPrompt=sys_prompt, temperature=0)
+                response_str = response(
+                    message=chunk, model=model, SysPrompt=sys_prompt, temperature=0
+                )
                 print(response_str)
                 json_part = extract_json(response_str)
                 if json_part:
@@ -727,10 +735,7 @@ def investment(queries, query_results, other_info_results):
                     time.sleep(60)
                     tokens_used = 0
 
-    combined_json = {
-        "sectors": [],
-        "final_score": 0
-    }
+    combined_json = {"sectors": [], "final_score": 0}
     total_score = 0
     count = 0
 
@@ -760,37 +765,84 @@ def extract_json(response_str):
     return None
 
 
-async def answer(question, pdf_content, file_name):
+async def answer(client, question, pdf_content, file_name):
+
     docs = await get_docs(question, pdf_content, file_name)
     context = "\n\n".join(docs)
     message = f"CONTEXT:\n\n{context}\n\nQUESTION :\n\n{question}\n\n"
     model = "meta-llama/llama-3-70b-instruct:nitro"
-    response_str = response(message=message, model=model, SysPrompt=QuestionRouter, temperature=0)
+    messages = [
+        {"role": "system", "content": QuestionRouter},
+        {"role": "user", "content": message},
+    ]
+    response_str = await client.chat.completions.create(
+        messages=messages, model=model, temperature=0
+    )
     print(response_str)
-    source = json.loads(response_str)
+    source = json.loads(response_str.choices[0].message.content)
     print(source)
+
     if source["datasource"].lower() == "vectorstore":
         print("---ROUTE QUESTION TO RAG---")
         data_source = "vectorstore"
         message = f"CONTEXT:\n\n{context}\n\nQUESTION:\n\n{question}\n\nANSWER:\n"
         model = "meta-llama/llama-3-70b-instruct:nitro"
-        output = response(message=message, model=model, SysPrompt=GenerationPrompt, temperature=0)
+        messages = [
+            {"role": "system", "content": GenerationPrompt},
+            {"role": "user", "content": message},
+        ]
+        output = await client.chat.completions.create(
+            messages=messages, model=model, temperature=0
+        )
+
     elif source["datasource"].lower() == "missing_information":
         print("---NO SUFFICIENT INFORMATION---")
         data_source = "missing information"
         message = f"CONTEXT:\n\n{context}\n\nQUESTION:\n\n{question}\n\nANSWER:\n"
         model = "meta-llama/llama-3-70b-instruct:nitro"
-        output = response(message=message, model=model, SysPrompt=MissingInformation, temperature=0)
+        messages = [
+            {"role": "system", "content": MissingInformation},
+            {"role": "user", "content": message},
+        ]
+        output = await client.chat.completions.create(
+            messages=messages, model=model, temperature=0
+        )
 
     return output
 
 
 async def process_queries(queries, pdf_content, file_name):
     # Run the `answer` function concurrently for all queries
-    tasks = [answer(query, pdf_content, file_name) for query in queries]
-    results = await asyncio.gather(*tasks)
+    async_client = openai.AsyncClient(
+        api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1"
+    )
+    async with async_client as aclient:
+        tasks = [
+            asyncio.create_task(answer(aclient, query, pdf_content, file_name))
+            for query in queries
+        ]
+        responses = await asyncio.gather(*tasks)
+
+    results = [response.choices[0].message.content for response in responses]
     return results
 
+
+async def web_search(session, question):
+    data = {
+        "topic": "",
+        "description": question,
+        "user_id": "",
+        "user_name": "",
+        "internet": True,
+        "output_format": "report_table",
+        "data_format": "No presets",
+    }
+    async with session.post(
+        "https://pvanand-search-generate-staging.hf.space/generate_report",
+        json=data,
+        headers={"Content-Type": "application/json"},
+    ) as response:
+        return await response.json()
 
 
 async def other_info(pdf_content, file_name):
@@ -803,17 +855,22 @@ async def other_info(pdf_content, file_name):
         "Risk Involved": f"What are risk involved in the starting a {niche} business in {industry_company}?",
         "Barrier To Entry": f"What are barrier to entry for a {niche} business in {industry_company}?",
         "Competitors": f"Who are the main competitors in the market for {niche} business in {industry_company}?",
-        "Challenges": f"What are in the challenges in the {niche} business for {industry_company}?"
+        "Challenges": f"What are in the challenges in the {niche} business for {industry_company}?",
     }
 
     # Fetch the results for each category
     results = {}
-    for category, question in questions.items():
-        print(question)
-        results[category] = markdown(await web_search(question))
-    print(results)
-    return results
+    async with aiohttp.ClientSession() as session:
+        tasks = [web_search(session, question) for question in questions.values()]
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
 
+    for type_, response in zip(questions, responses):
+        if isinstance(response, Exception):
+            results[type_] = {"error": str(response)}
+        else:
+            results[type_] = markdown(response)
+
+    return results
 
 
 # Main function adapted for Streamlit
@@ -844,9 +901,11 @@ async def main(file_path, progress_callback=None):
     if progress_callback:
         progress_callback("Grading the results...", 100)
     grading_results = json.loads(investment(queries, query_results, other_info_results))
+    print("\n\n\n", query_results, "\n\n\n")
+    print(other_info_results, "\n\n\n")
+    print(grading_results)
     if progress_callback:
         progress_callback("", 0)
-
 
     return queries, query_results, other_info_results, grading_results
 
@@ -856,8 +915,3 @@ if __name__ == "__main__":
     file_path = input("Enter the path to the PDF file: ")
     loop = asyncio.get_event_loop()
     results = loop.run_until_complete(main(file_path))
-
-
-
-
-

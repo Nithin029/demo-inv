@@ -1,17 +1,25 @@
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak,
+)
 from reportlab.lib import colors
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfbase import pdfmetrics
-from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_JUSTIFY
 import markdown
 import pandas as pd
 from bs4 import BeautifulSoup
 
 # Register Poppins font
-pdfmetrics.registerFont(TTFont('Poppins', 'Poppins-Regular.ttf'))
-pdfmetrics.registerFont(TTFont('Poppins-Bold', 'Poppins-Bold.ttf'))
+pdfmetrics.registerFont(TTFont("Poppins", "Poppins-Regular.ttf"))
+pdfmetrics.registerFont(TTFont("Poppins-Bold", "Poppins-Bold.ttf"))
+
 
 class ConditionalSpacer(Spacer):
     def wrap(self, availWidth, availHeight):
@@ -19,9 +27,49 @@ class ConditionalSpacer(Spacer):
             self.height = availHeight
         return Spacer.wrap(self, availWidth, availHeight)
 
+
+def header_footer(canvas, doc):
+    canvas.saveState()
+    styles = getSampleStyleSheet()
+
+    # Header
+    header = Paragraph(f"Pitch Deck Report", styles["Italic"])
+    header_2 = Paragraph(f"Elevatics", styles["Heading3"])
+    w, h = header.wrap(doc.width, doc.topMargin)
+    w_, h_ = header_2.wrap(doc.width, doc.topMargin)
+    header.drawOn(canvas, doc.leftMargin, doc.height + doc.topMargin)
+    header_2.drawOn(canvas, doc.width - doc.rightMargin, doc.height + doc.topMargin)
+
+    canvas.setStrokeColor(colors.HexColor("#1766e6"))
+    canvas.setLineWidth(2)
+    canvas.line(
+        doc.leftMargin,
+        doc.bottomMargin - 1,
+        doc.width + doc.leftMargin,
+        doc.bottomMargin - 1,
+    )
+    canvas.line(
+        doc.leftMargin,
+        doc.height + doc.topMargin - 5,
+        doc.width + doc.leftMargin,
+        doc.height + doc.topMargin - 5,
+    )
+
+    # Footer
+    footer = Paragraph(
+        "LLM may generate wrong and inaccurate results please verify the information.",
+        styles["Italic"],
+    )
+    w, h = footer.wrap(doc.width, doc.bottomMargin)
+    footer.drawOn(canvas, doc.leftMargin, h)
+
+    canvas.restoreState()
+
+
 def ensure_space(story, needed_space, doc):
     # Adding a spacer to move to next page if not enough space
     story.append(ConditionalSpacer(1, needed_space))
+
 
 def create_pdf(filename, queries, query_results, other_info_results, grading_results):
     # Initialize document with smaller margins for better visual appeal
@@ -30,38 +78,66 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
         pagesize=A4,
         leftMargin=30,
         rightMargin=30,
-        topMargin=30,
+        topMargin=40,
         bottomMargin=30,
     )
 
     # Define styles
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        'TitleStyle',
-        parent=styles['Title'],
-        fontName='Poppins-Bold',
-        fontSize=18,
-        leading=22
+        "TitleStyle",
+        parent=styles["Title"],
+        fontName="Poppins-Bold",
+        fontSize=24,
+        leading=22,
     )
     subtitle_style = ParagraphStyle(
-        'SubtitleStyle',
-        parent=styles['Heading2'],
-        fontName='Poppins-Bold',
+        "SubtitleStyle",
+        parent=styles["Heading2"],
+        fontName="Poppins-Bold",
+        alignment=TA_JUSTIFY,
+        fontSize=18,
+        leading=18,
+    )
+    subtitle_style_small = ParagraphStyle(
+        "SubtitleStyle",
+        parent=styles["Heading2"],
+        fontName="Poppins-Bold",
         fontSize=14,
-        leading=18
+        leading=18,
     )
     body_style = ParagraphStyle(
-        'BodyStyle',
-        parent=styles['BodyText'],
-        fontName='Poppins',
+        "BodyStyle",
+        parent=styles["BodyText"],
+        fontName="Poppins",
+        alignment=1,
         fontSize=10,
-        leading=14
+        leading=14,
     )
     html_style = ParagraphStyle(
-        "HTMLStyle", parent=body_style, fontName="Poppins", fontSize=10, leading=14
+        "HTMLStyle",
+        parent=body_style,
+        fontName="Poppins",
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+    )
+    html_style_bold = ParagraphStyle(
+        "HTMLStyle",
+        parent=body_style,
+        fontName="Poppins-Bold",
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
     )
     url_style = ParagraphStyle(
-        "URLStyle", parent=body_style, fontName="Poppins", fontSize=10, leading=14, textColor=colors.blue
+        "URLStyle",
+        parent=body_style,
+        fontName="Poppins",
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+        textColor=colors.blue,
     )
 
     table_style = TableStyle(
@@ -82,33 +158,65 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
     # Title
     title = Paragraph("Pitch Deck Report", title_style)
     story.append(title)
-    story.append(Spacer(1, 12))
+    story.append(Spacer(1, 18))
 
     # Frequently Asked Questions Section
     faq = Paragraph("Frequently Asked Questions", subtitle_style)
     story.append(faq)
-    story.append(Spacer(1, 4))
+    story.append(Spacer(1, 6))
 
     for idx in range(len(queries)):
-        ensure_space(story, 40, doc)  # Ensure space before adding a new section
-        query = Paragraph(queries[idx], subtitle_style)
+        # ensure_space(story, 30, doc)  # Ensure space before adding a new section
+        query = Paragraph(queries[idx], subtitle_style_small)
         story.append(query)
         story.append(Spacer(1, 4))
 
         query_html = markdown.markdown(query_results[idx], extensions=["tables"])
-        query_content = Paragraph(query_html, html_style)
-        story.append(query_content)
-        story.append(Spacer(1, 4))
+        soup = BeautifulSoup(query_html, "html.parser")
+
+        # Parse and add paragraphs
+        for element in soup:
+            if element.name == "p":
+                if (
+                    str(element).find("<strong>") >= 0
+                    and len(str(element).split()) < 20
+                ):
+                    paragraph_content = Paragraph(str(element), html_style_bold)
+                else:
+                    paragraph_content = Paragraph(str(element), html_style)
+                story.append(paragraph_content)
+                story.append(Spacer(1, 6))
+            elif element.name == "ul":
+                for li in element.find_all("li"):
+                    list_item_content = Paragraph(f"\t• {li.text}", html_style)
+                    story.append(list_item_content)
+                    story.append(Spacer(1, 6))
+            elif element.name == "table":
+                # Process table
+                data = []
+                for row in element.find_all("tr"):
+                    cells = row.find_all(["td", "th"])
+                    data.append(
+                        [
+                            Paragraph(cell.get_text(strip=True), body_style)
+                            for cell in cells
+                        ]
+                    )
+                table = Table(data)
+                table.setStyle(table_style)
+                story.append(table)
+                story.append(Spacer(1, 6))
 
     # New page for Other Information Section
     story.append(PageBreak())
 
-    other_info_title = Paragraph("Information related the Market ", subtitle_style)
+    other_info_title = Paragraph("Information related to the Market ", subtitle_style)
+    page_content = "Information related to the Market"
     story.append(other_info_title)
     story.append(Spacer(1, 4))
 
     for key, content in other_info_results.items():
-        ensure_space(story, 40, doc)  # Ensure space before adding a new section
+        # ensure_space(story, 30, doc)  # Ensure space before adding a new section
         # Add the key as a bold title
         info_paragraph = Paragraph(f"<b>{key}</b>:", subtitle_style)
         story.append(info_paragraph)
@@ -116,39 +224,52 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
 
         # Convert markdown content to HTML
         content_html = markdown.markdown(content, extensions=["tables"])
-        soup = BeautifulSoup(content_html, 'html.parser')
+        soup = BeautifulSoup(content_html, "html.parser")
 
         # Parse and add paragraphs
         for element in soup:
-            if element.name == 'p':
-                paragraph_content = Paragraph(str(element), html_style)
+            if element.name == "p":
+                if (
+                    str(element).find("<strong>") >= 0
+                    and len(str(element).split()) < 20
+                ):
+                    paragraph_content = Paragraph(str(element), html_style_bold)
+                else:
+                    paragraph_content = Paragraph(str(element), html_style)
                 story.append(paragraph_content)
                 story.append(Spacer(1, 6))
-            elif element.name == 'ul':
-                for li in element.find_all('li'):
-                    list_item_content = Paragraph(f'• {li.text}', html_style)
+            elif element.name == "ul":
+                for li in element.find_all("li"):
+                    list_item_content = Paragraph(f"\t• {li.text}", html_style)
                     story.append(list_item_content)
                     story.append(Spacer(1, 6))
-            elif element.name == 'table':
+            elif element.name == "table":
                 # Process table
                 data = []
-                for row in element.find_all('tr'):
-                    cells = row.find_all(['td', 'th'])
-                    data.append([Paragraph(cell.get_text(strip=True), html_style) for cell in cells])
+                for row in element.find_all("tr"):
+                    cells = row.find_all(["td", "th"])
+                    data.append(
+                        [
+                            Paragraph(cell.get_text(strip=True), body_style)
+                            for cell in cells
+                        ]
+                    )
                 table = Table(data)
                 table.setStyle(table_style)
                 story.append(table)
-                story.append(Spacer(1, 12))
+                story.append(Spacer(1, 6))
 
         # Extract URLs from <a> tags and add to story
-        urls = soup.find_all('a', href=True)
+        urls = soup.find_all("a", href=True)
         if urls:
             references_title = Paragraph("References:", subtitle_style)
             story.append(references_title)
             story.append(Spacer(1, 6))
 
             for url in urls:
-                url_paragraph = Paragraph(f"<a href='{url['href']}'>{url['href']}</a>", url_style)
+                url_paragraph = Paragraph(
+                    f"<a href='{url['href']}'>{url['href']}</a>", url_style
+                )
                 story.append(url_paragraph)
 
             story.append(Spacer(1, 12))
@@ -160,7 +281,10 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
     story.append(grading_title)
     story.append(Spacer(1, 4))
 
-    grading_dis = Paragraph("The scoring is done on the basis of the provided information from the pitch deck and is an estimate.", html_style)
+    grading_dis = Paragraph(
+        "The scoring is done on the basis of the provided information from the pitch deck and is an estimate.",
+        html_style,
+    )
     story.append(grading_dis)
     story.append(Spacer(1, 12))
 
@@ -176,11 +300,18 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
 
     for idx in range(1, len(table_data)):
         for jdx in range(len(table_data[idx])):
-            table_data[idx][jdx] = Paragraph(str(table_data[idx][jdx]), style=body_style)
+            table_data[idx][jdx] = Paragraph(
+                str(table_data[idx][jdx]), style=body_style
+            )
 
     table = Table(
         table_data,
-        colWidths=[doc.width * 0.2, doc.width * 0.1, doc.width * 0.1, doc.width * 0.6],
+        colWidths=[
+            doc.width * 0.2,
+            int(doc.width * 0.08),
+            int(doc.width * 0.12),
+            doc.width * 0.6,
+        ],
     )
     table.setStyle(table_style)
     story.append(table)
@@ -196,12 +327,12 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
         fontSize=24,
         leading=30,
         fontName="Poppins-Bold",
-        textColor=colors.red,
+        textColor=colors.lightseagreen,
     )
     final_score = Paragraph(
-        f"{grading_results['final_score']}", custom_style
+        f"{grading_results['sectors'][0]['overall_score']}", custom_style
     )
     story.append(final_score)
 
     # Build PDF
-    doc.build(story)
+    doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
