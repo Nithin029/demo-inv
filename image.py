@@ -34,7 +34,7 @@ import aiohttp
 load_dotenv()
 
 TOGETHER_API_KEY = os.getenv("TOGETHER_API")
-GEMINI_API_KEY = os.getenv("GOOGLE_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 COHERE_API = os.getenv("COHERE_API")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -198,6 +198,9 @@ queries = [
     "What issue or challenge is the company addressing?",
 ]
 
+document_processing_event = asyncio.Event()
+document_processing_event.set()
+
 
 def get_digest(pdf_content):
     h = hashlib.sha256()
@@ -284,14 +287,16 @@ def extract_image_content(pixmap_list: List[pymupdf.Pixmap], text: str) -> List[
             print(e)
 
     graph_image = classifier.classify(img_list)
+    print(graph_image)
 
     response_list = []
 
-    for idx, is_graph in graph_image:
+    for idx, is_graph in enumerate(graph_image):
         if is_graph:
             response = model.generate_content(
                 [description_prompt, img_list[idx]], stream=False
             )
+            print("\n\n", response.text, "\n\n")
             response_list.append(str(response.text))
 
     return response_list
@@ -302,7 +307,7 @@ def extract_content(pdf_content: bytes) -> List[Tuple[str, int]]:
     Takes PDF(bytes) and return a list of tuples containing text(including textual and image content)
     and page number containing that text.
     """
-
+    print("Extract content called ")
     pdf_doc = pymupdf.open(stream=pdf_content, filetype="pdf")
 
     pages_content = []
@@ -328,11 +333,11 @@ def extract_content(pdf_content: bytes) -> List[Tuple[str, int]]:
                     refered_xref.append(xref)
                 except ValueError as e:
                     print(f"Skipping image with due to error: {e}")
-
-        img_content = extract_image_content(
-            pixmap_list=pixmap_list, text=text_content.replace("\n", "\t")
-        )
-        page_content = page_content + "\n\n" + "\n\n".join(img_content)
+        if len(pixmap_list) > 0:
+            img_content = extract_image_content(
+                pixmap_list=pixmap_list, text=text_content.replace("\n", "\t")
+            )
+            page_content = page_content + "\n\n" + "\n\n".join(img_content)
 
         pages_content.append(page_content)
 
@@ -445,6 +450,8 @@ def get_next_namespace():
 
 
 def insert_data(file_id, file_name, name_space):
+
+    print("inserted")
     conn = psycopg2.connect(
         dbname="postgres",
         user="postgres.kstfnkkxavowoutfytoq",
@@ -486,7 +493,7 @@ def create_documents(page_contents):
     return documents
 
 
-async def embed_and_upsert(documents, name_space):
+def embed_and_upsert(documents, name_space):
     chunks = [doc["page_content"] for doc in documents]
     pinecone_index = pinecone_server()
     embeddings_response = client.embeddings.create(
@@ -503,11 +510,11 @@ async def embed_and_upsert(documents, name_space):
     pinecone_index.upsert(vectors=pinecone_data, namespace=name_space)
 
 
-async def embedding_creation(pdf_content, name_space):
+def embedding_creation(pdf_content, name_space):
     data = extract_content(pdf_content)
     # text_data = [i[0] for i in data]
     documents = create_documents(data)
-    await embed_and_upsert(documents, name_space)
+    embed_and_upsert(documents, name_space)
     print("Embeddings created and upserted successfully into Pinecone.")
 
 
@@ -531,7 +538,13 @@ def process_rerank_response(rerank_response, docs):
     return rerank_docs
 
 
-async def get_name_space(question, pdf_content, file_name):
+async def get_docs(question, pdf_content, file_name):
+    global document_processing_event
+    index = pinecone_server()
+    co = cohere.Client(COHERE_API)
+    xq = embed(question)
+
+    await document_processing_event.wait()
     file_id = get_digest(pdf_content)
     existing_namespace = fetch_vectorstore_from_db(file_id)
 
@@ -539,22 +552,23 @@ async def get_name_space(question, pdf_content, file_name):
         print("Document already exists. Using existing namespace.")
         name_space = existing_namespace
     else:
+        document_processing_event.clear()
+        print("evet stopped")
         print("Document is new. Creating embeddings and new namespace.")
         name_space = get_next_namespace()
-        await embedding_creation(pdf_content, name_space)
+        print(name_space)
+        embedding_creation(pdf_content, name_space)
         insert_data(file_id, file_name, name_space)
-        await asyncio.sleep(5)  # Use asyncio.sleep instead of time.sleep
+        print("Sleep complete....")
+        # except Exception as e:
+        #    print(e)
+        # finally:
+        print("finally called")
+        document_processing_event.set()
 
-    return name_space
-
-
-async def get_docs(question, pdf_content, file_name):
-    index = pinecone_server()
-    co = cohere.Client(COHERE_API)
-    xq = embed(question)
-    name_space = await get_name_space(question, pdf_content, file_name)
-    # print(name_space)
+    # Query is now inside the lock to ensure it happens after any new document processing
     res = index.query(namespace=name_space, vector=xq, top_k=5, include_metadata=True)
+
     print(res)
     docs = [x["metadata"]["original_content"] for x in res["matches"]]
 

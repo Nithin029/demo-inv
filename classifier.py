@@ -13,7 +13,7 @@ class Classifier:
         """
         img : PIL Image object of shape (B,HxW,C)
         """
-        img = img.resize((192,192))
+        img = img.resize((192, 192))
         np_image = np.asarray(img) / 255
         return np_image.astype(np.float32)
 
@@ -24,7 +24,7 @@ class Classifier:
             pi = self.preprocess(img)
             processed_imgs.append(pi)
 
-        batch = np.array(processed_imgs)
+        batch = np.array(processed_imgs).astype(np.float32)
         onnx_input = {"images": batch}
         prediction = self.classifier.run(None, onnx_input)
 
