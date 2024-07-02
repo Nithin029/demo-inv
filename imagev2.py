@@ -684,8 +684,8 @@ def investment(queries, query_results, other_info_results):
     encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
     sys_prompt_token_size = len(encoding.encode(sys_prompt))
 
-    max_model_tokens = 6000
-    max_chunk_size = 6000  # Adjust to leave more buffer space
+    max_model_tokens = 7000
+    max_chunk_size = 7000  # Adjust to leave more buffer space
 
     chunks = split_into_chunks(message, token_limit=max_chunk_size)
 
