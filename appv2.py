@@ -2,7 +2,7 @@ import streamlit as st
 import asyncio
 import pandas as pd
 import os
-from image import main as process_pdf
+from imagev2 import main as process_pdf
 from streamlit_option_menu import option_menu
 
 # from image import main as process_pdf
