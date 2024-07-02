@@ -692,7 +692,7 @@ def investment(queries, query_results, other_info_results):
     model = "meta-llama/llama-3-70b-instruct:nitro"
     responses = []
     tokens_used = 0
-    max_tokens_per_minute = 6000
+    max_tokens_per_minute = 7000
 
     for chunk in chunks:
         chunk_token_size = len(encoding.encode(chunk))
