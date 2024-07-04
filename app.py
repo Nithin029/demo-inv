@@ -1,174 +1,378 @@
-import streamlit as st
-import asyncio
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak,
+)
+from reportlab.lib import colors
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
+from reportlab.lib.enums import TA_JUSTIFY
+import markdown
 import pandas as pd
-import os
-from image import main as process_pdf
-from pdf import create_pdf
+from bs4 import BeautifulSoup
 
-st.set_page_config(layout="wide")
+# Register Poppins font
+pdfmetrics.registerFont(TTFont("Poppins", "Poppins-Regular.ttf"))
+pdfmetrics.registerFont(TTFont("Poppins-Bold", "Poppins-Bold.ttf"))
 
-# Page state tracking
-if 'page' not in st.session_state:
-    st.session_state.page = 0
-if 'results' not in st.session_state:
-    st.session_state.results = None
-if 'progress_message' not in st.session_state:
-    st.session_state.progress_message = ""
-if 'uploaded_file_name' not in st.session_state:
-    st.session_state.uploaded_file_name = ""
 
-# Define display functions for each section
-def display_queries_and_answers(queries, query_results):
-    st.header("Queries and Answers")
+class ConditionalSpacer(Spacer):
+    def wrap(self, availWidth, availHeight):
+        if availHeight < self.height:
+            self.height = availHeight
+        return Spacer.wrap(self, availWidth, availHeight)
 
-    for i, (query, result) in enumerate(zip(queries, query_results), start=1):
-        st.markdown(f"**Query {i}:**")
-        st.markdown(f"**Question:** {query}")
-        st.markdown(f"**Answer:**")
-        st.write(result)
 
-        if i < len(queries):
-            st.markdown("---")
+def header_footer(canvas, doc):
+    canvas.saveState()
+    styles = getSampleStyleSheet()
 
-def display_other_info(other_info_results):
-    st.header("Other Information")
-    for category, response in other_info_results.items():
-        details_html = f"""
-        <details>
-            <summary>{category}</summary>
-            <div style="margin-left: 20px;">{response}</div>
-        </details>
-        """
-        st.markdown(details_html, unsafe_allow_html=True)
+    # Header
+    header = Paragraph(f"Pitch Deck Report", styles["Italic"])
+    header_2 = Paragraph(f"Elevatics", styles["Heading3"])
+    w, h = header.wrap(doc.width, doc.topMargin)
+    w_, h_ = header_2.wrap(doc.width, doc.topMargin)
+    header.drawOn(canvas, doc.leftMargin, doc.height + doc.topMargin)
+    header_2.drawOn(canvas, doc.width - doc.rightMargin, doc.height + doc.topMargin)
 
-def display_grading_results(grading_results):
-    df = {
-        "Area/Section": [],
-        "Score": [],
-        "Weightage": [],
-        "Reasoning": []
-    }
+    canvas.setStrokeColor(colors.HexColor("#1766e6"))
+    canvas.setLineWidth(2)
+    canvas.line(
+        doc.leftMargin,
+        doc.bottomMargin - 1,
+        doc.width + doc.leftMargin,
+        doc.bottomMargin - 1,
+    )
+    canvas.line(
+        doc.leftMargin,
+        doc.height + doc.topMargin - 5,
+        doc.width + doc.leftMargin,
+        doc.height + doc.topMargin - 5,
+    )
 
-    gr = grading_results
+    # Footer
+    footer = Paragraph(
+        "LLM may generate wrong and inaccurate results please verify the information.",
+        styles["Italic"],
+    )
+    w, h = footer.wrap(doc.width, doc.bottomMargin)
+    footer.drawOn(canvas, doc.leftMargin, h)
 
-    for datapoint in gr["sectors"][0]["sections"]:
+    canvas.restoreState()
+
+
+def ensure_space(story, needed_space, doc):
+    # Adding a spacer to move to next page if not enough space
+    story.append(ConditionalSpacer(1, needed_space))
+
+
+def create_pdf(filename, queries, query_results, other_info_results, grading_results,recommendation_results):
+    # Initialize document with smaller margins for better visual appeal
+    doc = SimpleDocTemplate(
+        filename,
+        pagesize=A4,
+        leftMargin=30,
+        rightMargin=30,
+        topMargin=40,
+        bottomMargin=30,
+    )
+
+    # Define styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "TitleStyle",
+        parent=styles["Title"],
+        fontName="Poppins-Bold",
+        fontSize=24,
+        leading=22,
+    )
+    subtitle_style = ParagraphStyle(
+        "SubtitleStyle",
+        parent=styles["Heading2"],
+        fontName="Poppins-Bold",
+        alignment=TA_JUSTIFY,
+        fontSize=18,
+        leading=18,
+    )
+    subtitle_style_small = ParagraphStyle(
+        "SubtitleStyle",
+        parent=styles["Heading2"],
+        fontName="Poppins-Bold",
+        fontSize=14,
+        leading=18,
+    )
+    body_style = ParagraphStyle(
+        "BodyStyle",
+        parent=styles["BodyText"],
+        fontName="Poppins",
+        alignment=1,
+        fontSize=10,
+        leading=14,
+    )
+    html_style = ParagraphStyle(
+        "HTMLStyle",
+        parent=body_style,
+        fontName="Poppins",
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+    )
+    html_style_bold = ParagraphStyle(
+        "HTMLStyle",
+        parent=body_style,
+        fontName="Poppins-Bold",
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+    )
+    url_style = ParagraphStyle(
+        "URLStyle",
+        parent=body_style,
+        fontName="Poppins",
+        fontSize=10,
+        leading=14,
+        alignment=TA_JUSTIFY,
+        textColor=colors.blue,
+    )
+
+    table_style = TableStyle(
+        [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.lightblue),  # Header color
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),  # Header text color
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),  # Center align all cells
+            ("FONTNAME", (0, 0), (-1, 0), "Poppins-Bold"),  # Header font
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 12),  # Header padding
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),  # Grid lines
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ]
+    )
+
+    # Story container
+    story = []
+
+    # Title
+    title = Paragraph("Pitch Deck Report", title_style)
+    story.append(title)
+    story.append(Spacer(1, 18))
+
+    # Frequently Asked Questions Section
+    faq = Paragraph("Frequently Asked Questions", subtitle_style)
+    story.append(faq)
+    story.append(Spacer(1, 6))
+
+    for idx in range(len(queries)):
+        # ensure_space(story, 30, doc)  # Ensure space before adding a new section
+        query = Paragraph(queries[idx], subtitle_style_small)
+        story.append(query)
+        story.append(Spacer(1, 4))
+
+        query_html = markdown.markdown(query_results[idx], extensions=["tables"])
+        soup = BeautifulSoup(query_html, "html.parser")
+
+        # Parse and add paragraphs
+        for element in soup:
+            if element.name == "p":
+                if (
+                    str(element).find("<strong>") >= 0
+                    and len(str(element).split()) < 20
+                ):
+                    paragraph_content = Paragraph(str(element), html_style_bold)
+                else:
+                    paragraph_content = Paragraph(str(element), html_style)
+                story.append(paragraph_content)
+                story.append(Spacer(1, 6))
+            elif element.name == "ul":
+                for li in element.find_all("li"):
+                    list_item_content = Paragraph(f"\t• {li.text}", html_style)
+                    story.append(list_item_content)
+                    story.append(Spacer(1, 6))
+            elif element.name == "table":
+                # Process table
+                data = []
+                for row in element.find_all("tr"):
+                    cells = row.find_all(["td", "th"])
+                    data.append(
+                        [
+                            Paragraph(cell.get_text(strip=True), body_style)
+                            for cell in cells
+                        ]
+                    )
+                table = Table(data)
+                table.setStyle(table_style)
+                story.append(table)
+                story.append(Spacer(1, 6))
+
+    # New page for Other Information Section
+    story.append(PageBreak())
+
+    other_info_title = Paragraph("Information related to the Market ", subtitle_style)
+    page_content = "Information related to the Market"
+    story.append(other_info_title)
+    story.append(Spacer(1, 4))
+
+    for key, content in other_info_results.items():
+        # ensure_space(story, 30, doc)  # Ensure space before adding a new section
+        # Add the key as a bold title
+        info_paragraph = Paragraph(f"<b>{key}</b>:", subtitle_style)
+        story.append(info_paragraph)
+        story.append(Spacer(1, 12))
+
+        # Convert markdown content to HTML
+        content_html = markdown.markdown(content, extensions=["tables"])
+        soup = BeautifulSoup(content_html, "html.parser")
+
+        # Parse and add paragraphs
+        for element in soup:
+            if element.name == "p":
+                if (
+                    str(element).find("<strong>") >= 0
+                    and len(str(element).split()) < 20
+                ):
+                    paragraph_content = Paragraph(str(element), html_style_bold)
+                else:
+                    paragraph_content = Paragraph(str(element), html_style)
+                story.append(paragraph_content)
+                story.append(Spacer(1, 6))
+            elif element.name == "ul":
+                for li in element.find_all("li"):
+                    list_item_content = Paragraph(f"\t• {li.text}", html_style)
+                    story.append(list_item_content)
+                    story.append(Spacer(1, 6))
+            elif element.name == "table":
+                # Process table
+                data = []
+                for row in element.find_all("tr"):
+                    cells = row.find_all(["td", "th"])
+                    data.append(
+                        [
+                            Paragraph(cell.get_text(strip=True), body_style)
+                            for cell in cells
+                        ]
+                    )
+                table = Table(data)
+                table.setStyle(table_style)
+                story.append(table)
+                story.append(Spacer(1, 6))
+
+        # Extract URLs from <a> tags and add to story
+        urls = soup.find_all("a", href=True)
+        if urls:
+            references_title = Paragraph("References:", subtitle_style)
+            story.append(references_title)
+            story.append(Spacer(1, 6))
+
+            for url in urls:
+                url_paragraph = Paragraph(
+                    f"<a href='{url['href']}'>{url['href']}</a>", url_style
+                )
+                story.append(url_paragraph)
+
+            story.append(Spacer(1, 12))
+
+    # New page for Grading Results Section
+    story.append(PageBreak())
+
+    grading_title = Paragraph("Grading", subtitle_style)
+    story.append(grading_title)
+    story.append(Spacer(1, 4))
+
+    grading_dis = Paragraph(
+        "The scoring is done on the basis of the provided information from the pitch deck and is an estimate.",
+        html_style,
+    )
+    story.append(grading_dis)
+    story.append(Spacer(1, 12))
+
+    # Convert grading results to table format
+    df = {"Area/Section": [], "Score": [], "Weightage": [], "Reasoning": []}
+    for datapoint in grading_results["sectors"][0]["sections"]:
         df["Area/Section"].append(datapoint["section"])
         df["Score"].append(datapoint["score"])
         df["Weightage"].append(datapoint["weight"])
         df["Reasoning"].append(datapoint["reasoning"])
+    df = pd.DataFrame(df)
+    table_data = [df.columns.values.tolist()] + df.values.tolist()
 
-    grading_df = pd.DataFrame(df)
+    for idx in range(1, len(table_data)):
+        for jdx in range(len(table_data[idx])):
+            table_data[idx][jdx] = Paragraph(
+                str(table_data[idx][jdx]), style=body_style
+            )
 
-    st.header(f"Industry: {gr['sectors'][0]['sector']}")
-    st.table(data=grading_df)
-    st.subheader(f"Estimated score: {gr['final_score']}")
+    table = Table(
+        table_data,
+        colWidths=[
+            doc.width * 0.2,
+            int(doc.width * 0.08),
+            int(doc.width * 0.12),
+            doc.width * 0.6,
+        ],
+    )
+    table.setStyle(table_style)
+    story.append(table)
 
-def change_page(step):
-    st.session_state.page += step
+    # Final Score Section
+    ensure_space(story, 20, doc)  # Ensure space before adding a new section
+    final_score_title = Paragraph("Final Estimated Score:", subtitle_style)
+    story.append(final_score_title)
+    story.append(Spacer(1, 12))
 
-def streamlit_main():
-    st.title("Pitch Deck Analysis")
+    custom_style = ParagraphStyle(
+        name="BigItalicBold",
+        fontSize=24,
+        leading=30,
+        fontName="Poppins-Bold",
+        textColor=colors.lightseagreen,
+    )
+    final_score = Paragraph(
+        f"{grading_results['sectors'][0]['overall_score']}", custom_style
+    )
+    story.append(final_score)
 
-    uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
+    story.append(PageBreak())
 
-    if uploaded_file is not None and uploaded_file.name != st.session_state.uploaded_file_name:
-        temp_file_path = f"/tmp/{uploaded_file.name}"
-        with open(temp_file_path, "wb") as temp_file:
-            temp_file.write(uploaded_file.getbuffer())
+    rec = Paragraph("Recommendations", subtitle_style)
+    story.append(rec)
+    story.append(Spacer(1, 6))
+    rec_html=markdown.markdown(recommendation_results)
+    soup = BeautifulSoup(rec_html, "html.parser")
 
-        st.session_state.uploaded_file_name = uploaded_file.name
-
-        # Clear previous results if a new file is uploaded
-        st.session_state.results = None
-        st.session_state.page = 0
-
-        if st.session_state.results is None:
-            progress_bar = st.empty()
-            progress_text = st.empty()
-
-            def progress_callback(stage, progress):
-                if stage:
-                    progress_text.text(stage)
-                    progress_bar.progress(progress)
-                else:
-                    progress_text.empty()
-                    progress_bar.empty()
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            results = loop.run_until_complete(process_pdf_with_progress(temp_file_path, progress_callback))
-
-            if results is None:
-                st.error("File not found or could not be processed.")
-                return
-
-            st.session_state.results = results
-
-    if st.session_state.results is not None:
-        queries, query_results, other_info_results, grading_results = st.session_state.results
-
-        col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
-
-        with col1:
-            if st.session_state.page > 0:
-                st.button("◀", key="back_arrow", on_click=lambda: change_page(-1))
-
-        with col2:
-            if st.session_state.page == 0:
-                display_queries_and_answers(queries, query_results)
-            elif st.session_state.page == 1:
-                display_other_info(other_info_results)
-            elif st.session_state.page == 2:
-                display_grading_results(grading_results)
-
-        with col3:
-            if st.session_state.page < 2:
-                st.button("▶", key="next_arrow", on_click=lambda: change_page(1))
-
-        st.markdown("""
-            <style>
-            div[data-testid="stHorizontalBlock"] > div:nth-child(1) {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-            }
-            div[data-testid="stHorizontalBlock"] > div:nth-child(3) {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-            }
-            div[data-testid="stHorizontalBlock"] > div:nth-child(1) button,
-            div[data-testid="stHorizontalBlock"] > div:nth-child(3) button {
-                border-radius: 50%;
-                width: 50px;
-                height: 50px;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                font-size: 20px;
-                background-color:#90EE90;
-                color: black;
-            }
-            </style>
-        """, unsafe_allow_html=True)
-
-        pdf_file = 'output.pdf'
-        create_pdf(pdf_file, queries, query_results, other_info_results, grading_results)
-
-        with open(pdf_file, "rb") as pdf_file:
-            pdf_data = pdf_file.read()
-
-        st.download_button(
-            label="Download PDF",
-            data=pdf_data,
-            file_name="output.pdf",
-            mime="application/pdf",
-        )
-
-async def process_pdf_with_progress(file_path, progress_callback):
-    return await process_pdf(file_path, progress_callback)
-
-if __name__ == "__main__":
-    streamlit_main()
+    # Parse and add paragraphs
+    for element in soup:
+        if element.name == "p":
+            if (
+                    str(element).find("<strong>") >= 0
+                    and len(str(element).split()) < 20
+            ):
+                paragraph_content = Paragraph(str(element), html_style_bold)
+            else:
+                paragraph_content = Paragraph(str(element), html_style)
+            story.append(paragraph_content)
+            story.append(Spacer(1, 6))
+        elif element.name == "ul":
+            for li in element.find_all("li"):
+                list_item_content = Paragraph(f"\t• {li.text}", html_style)
+                story.append(list_item_content)
+                story.append(Spacer(1, 6))
+        elif element.name == "table":
+            # Process table
+            data = []
+            for row in element.find_all("tr"):
+                cells = row.find_all(["td", "th"])
+                data.append(
+                    [
+                        Paragraph(cell.get_text(strip=True), body_style)
+                        for cell in cells
+                    ]
+                )
+            table = Table(data)
+            table.setStyle(table_style)
+            story.append(table)
+            story.append(Spacer(1, 6))
+    # Build PDF
+    doc.build(story, onFirstPage=header_footer, onLaterPages=header_footer)
