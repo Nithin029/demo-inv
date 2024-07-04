@@ -378,6 +378,7 @@ def markdown(output):
 
     combined_markdown = ""
     if report_html.strip():  # Check if report_html is not empty
+        report_html = report_html.replace('\n', ' ')
         combined_markdown += html2text.html2text(report_html) + "\n\n"
     combined_markdown += references_markdown
     return combined_markdown
