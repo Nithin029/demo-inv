@@ -171,7 +171,7 @@ def create_pdf(filename, queries, query_results, other_info_results, grading_res
         story.append(query)
         story.append(Spacer(1, 4))
 
-        query_html = markdown.markdown(query_results[idx], extensions=["tables"])
+        query_html = markdown.markdown(query_results[idx])
         soup = BeautifulSoup(query_html, "html.parser")
 
         # Parse and add paragraphs
