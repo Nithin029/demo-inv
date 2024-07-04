@@ -966,7 +966,7 @@ async def main(file_path, progress_callback=None):
 
      # Calculate grading results
     if progress_callback:
-        progress_callback("Providing Recommendation", 100)
+        progress_callback("Generating Recommendation", 100)
     recommendation_results = recommendations(queries, query_results, other_info_results)
     print("\n\n\n", query_results, "\n\n\n")
     print(other_info_results, "\n\n\n")
