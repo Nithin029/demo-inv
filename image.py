@@ -88,12 +88,11 @@ Investment = """You are a professional financial analyst evaluating sectors for 
 
 1. Identify the sector from the provided CONTEXT.
 2. Grade only the specified KEYS on a scale of 1-10, with higher grades indicating better investment potential. Take a conservative approach in grading.
-3. Provide reasoning for each grade considering both qualitative and quantitative factors.
+3. Provide reasoning for each grade considering both qualitative and quantitative factors, including the FUNDING information.
 4. Assign weights to each section (total should equal 1).
 5. Calculate an overall weighted score.
 
-
-Use only the information given in the CONTEXT. Be conservative in your grading to reflect investment risks. Output your analysis in the following JSON format:
+Use only the information given in the CONTEXT and the FUNDING provided. Be conservative in your grading to reflect investment risks. Output your analysis in the following JSON format:
 
 ```json
 {
@@ -103,10 +102,10 @@ Use only the information given in the CONTEXT. Be conservative in your grading t
       "section": "Key from Context",
       "score": "Grade (1-10)",
       "weight": "Weight (0-1)",
-      "reasoning": "Detailed analysis"
+      "reasoning": "Detailed analysis including funding considerations"
     }
   ],
-  "overall_score": "Calculated weighted score",
+  "overall_score": "Calculated weighted score"
 }
 ```
 
@@ -120,7 +119,22 @@ Grade only these KEYS from the CONTEXT:
 7. "Competitors"
 8. "Challenges"
 
-Provide your analysis based on the CONTEXT that will be given. 
+Additionally, consider the FUNDING provided by the user:
+- The FUNDING will be classified as follows:
+  * Low: Less than $1 million
+  * Medium: $1 million to $10 million
+  * High: More than $10 million
+- Adjust your scoring based on the funding classification:
+  * For Low funding: Reduce scores by 1-2 points where relevant.
+  * For Medium funding: Keep scores as they would be without considering funding.
+  * For High funding: Increase scores by 1-2 points where relevant.
+- Incorporate the funding information into your analysis of each relevant key.
+- Consider how the funding level impacts various aspects such as projected financials, ability to execute plans, competitive positioning, and risk mitigation.
+- Reflect the impact of funding in your scoring and reasoning for each relevant key.
+-Don't explicitly mention the original funding in the answer but use them to give reasoning.
+
+
+Provide your analysis based on the CONTEXT and FUNDING that will be given.
 """
 recommendation="""You are an experienced investor and business advisor. You have been provided with a variable called CONTEXT, which contains:
 
@@ -640,7 +654,6 @@ def further_split_chunk(chunk, token_limit):
 
 # Define the investment function
 def investment(queries, query_results, other_info_results):
-    time.sleep(1)
     # Combine queries and query_results into a dictionary
     combined_results = {q: r for q, r in zip(queries[-4:], query_results[-4:])}
 
@@ -651,7 +664,7 @@ def investment(queries, query_results, other_info_results):
         else:
             combined_results[key] = value
 
-    message = f"CONTEXT:\n\n{json.dumps(combined_results, indent=4)}\n\n"
+    message = f"CONTEXT:\n\n{json.dumps(combined_results, indent=4)}\n\nFUNDING:\n\n{Funding}\n\n"
 
     sys_prompt = Investment
     encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
@@ -662,7 +675,7 @@ def investment(queries, query_results, other_info_results):
 
     chunks = split_into_chunks(message, token_limit=max_chunk_size)
 
-    model = "meta-llama/llama-3-70b-instruct:nitro"
+    model = "anthropic/claude-3.5-sonnet"
     responses = []
     tokens_used = 0
     max_tokens_per_minute = 7000
@@ -933,7 +946,7 @@ async def other_info(pdf_content, file_name):
     return results
 
 # Main function adapted for Streamlit
-async def main(file_path, progress_callback=None):
+async def main(file_path,Funding, progress_callback=None):
     if not os.path.isfile(file_path):
         raise FileNotFoundError("File not found.")
 
@@ -960,7 +973,7 @@ async def main(file_path, progress_callback=None):
     # Calculate grading results
     if progress_callback:
         progress_callback("Grading the results...", 75)
-    grading_results = json.loads(investment(queries, query_results, other_info_results))
+    grading_results = json.loads(investment(queries, query_results, other_info_results,Funding))
     if progress_callback:
         progress_callback("", 0)
 
