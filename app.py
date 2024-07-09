@@ -152,7 +152,7 @@ def streamlit_main():
         elif selected == "Recommendation":
             display_recommendation_results(recommendation_results=recommendation_results)
 
-        #st.subheader(f"Funding Estimate: {st.session_state.funding_estimate} million USD")
+        st.subheader(f"Funding Estimate: {st.session_state.funding_estimate} million USD")
 
         pdf_file = "output.pdf"
         create_pdf(
