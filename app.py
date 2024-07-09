@@ -97,47 +97,42 @@ def streamlit_main():
 
         st.session_state.uploaded_file_name = uploaded_file.name
 
-        try:
-            funding_estimate = st.number_input(
-                "Enter your estimate of the funding for the startup (in million USD):",
-                min_value=0.0,
-                step=0.1,
-                format="%.2f",
-                value=float('nan')  # This will remove the initial value
-            )
+        funding_estimate = st.number_input(
+            "Enter your estimate of the funding for the startup (in million USD):",
+            min_value=0.0,
+            step=0.1,
+            format="%.2f",
+        )
 
+        if st.button("Process PDF"):
             if funding_estimate <= 0:
                 st.error("Funding estimate must be greater than 0.")
                 return
 
             st.session_state.funding_estimate = funding_estimate
 
-            if st.session_state.results is None:
-                progress_bar = st.empty()
-                progress_text = st.empty()
+            progress_bar = st.empty()
+            progress_text = st.empty()
 
-                def progress_callback(stage, progress):
-                    if stage:
-                        progress_text.text(stage)
-                        progress_bar.progress(progress)
-                    else:
-                        progress_text.empty()
-                        progress_bar.empty()
+            def progress_callback(stage, progress):
+                if stage:
+                    progress_text.text(stage)
+                    progress_bar.progress(progress)
+                else:
+                    progress_text.empty()
+                    progress_bar.empty()
 
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                results = loop.run_until_complete(
-                    process_pdf_with_progress(temp_file_path, st.session_state.funding_estimate, progress_callback)
-                )
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            results = loop.run_until_complete(
+                process_pdf_with_progress(temp_file_path, st.session_state.funding_estimate, progress_callback)
+            )
 
-                if results is None:
-                    st.error("File not found or could not be processed.")
-                    return
+            if results is None:
+                st.error("File not found or could not be processed.")
+                return
 
-                st.session_state.results = results
-
-        except ValueError as e:
-            st.error(f"Invalid input: {e}")
+            st.session_state.results = results
 
     if st.session_state.results is not None:
         queries, query_results, other_info_results, grading_results, recommendation_results = (
