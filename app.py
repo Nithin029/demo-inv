@@ -4,6 +4,8 @@ import pandas as pd
 import os
 from image import main as process_pdf
 from streamlit_option_menu import option_menu
+
+# from image import main as process_pdf
 from pdf import create_pdf
 
 st.set_page_config(layout="wide")
@@ -100,10 +102,11 @@ def streamlit_main():
                 "Enter your estimate of the funding for the startup (in million USD):",
                 min_value=0.0,
                 step=0.1,
-                format="%.1f",
+                format="%.2f",
+                value=float('nan')  # This will remove the initial value
             )
 
-            if funding_estimate is not None and funding_estimate <= 0:
+            if funding_estimate <= 0:
                 st.error("Funding estimate must be greater than 0.")
                 return
 
@@ -149,7 +152,7 @@ def streamlit_main():
         elif selected == "Recommendation":
             display_recommendation_results(recommendation_results=recommendation_results)
 
-        st.subheader(f"Funding Estimate: {st.session_state.funding_estimate} million USD")
+        #st.subheader(f"Funding Estimate: {st.session_state.funding_estimate} million USD")
 
         pdf_file = "output.pdf"
         create_pdf(
