@@ -364,10 +364,14 @@ def markdown(output):
 
     combined_markdown = ""
     if report_html.strip():  # Check if report_html is not empty
-        report_html = report_html.replace('\n', ' ')
-        combined_markdown += html2text.html2text(report_html) + "\n\n"
+        # Use html2text to convert HTML to Markdown, ensuring it doesn't break lines unnecessarily
+        report_markdown = html2text.html2text(report_html)
+        # Remove unwanted newlines within Markdown headings
+        report_markdown = report_markdown.replace('\n', ' ').replace('  ', '\n')
+        combined_markdown += report_markdown + "\n\n"
     combined_markdown += references_markdown
     return combined_markdown
+
 
 
 def pinecone_server():
