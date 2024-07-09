@@ -657,7 +657,7 @@ def further_split_chunk(chunk, token_limit):
 
 
 # Define the investment function
-def investment(queries, query_results, other_info_results):
+def investment(queries, query_results, other_info_results,Funding):
     # Combine queries and query_results into a dictionary
     combined_results = {q: r for q, r in zip(queries[-4:], query_results[-4:])}
 
