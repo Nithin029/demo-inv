@@ -11,6 +11,7 @@ import pdfkit
 import json
 import requests
 import tempfile
+import aiohttp
 import mistune
 import markdown as md
 import psycopg2
@@ -470,6 +471,99 @@ def insert_data(file_id, file_name, name_space):
     cur.close()
     conn.close()
 
+def insert_answers(file_id, file_name, funding,queries,query_results,other_info_results,grading_results,recommendation_results):
+
+    conn = psycopg2.connect(
+        dbname="postgres",
+        user="postgres.kstfnkkxavowoutfytoq",
+        password="nI20th0in3@",
+        host="aws-0-us-east-1.pooler.supabase.com",
+        port="5432",
+    )
+    cur = conn.cursor()
+    create_table_query = """
+            CREATE TABLE IF NOT EXISTS investment_answer_research_pro (
+                file_id VARCHAR(1024) PRIMARY KEY,
+                file_name VARCHAR(1024),
+                funding VARCHAR(1024),
+                queries JSONB,
+                query_results JSONB,
+                other_info_results JSONB,
+                grading_results JSONB,
+                recommendation_results VARCHAR(8192)
+            );
+        """
+    cur.execute(create_table_query)
+    conn.commit()
+
+    # Insert the data into the table
+    insert_query = """
+        INSERT INTO investment_answer_research_pro (
+            file_id, file_name, funding, queries, query_results, other_info_results, grading_results, recommendation_results
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (file_id) DO NOTHING;
+        """
+
+    cur.execute(insert_query, (
+        file_id,
+        file_name,
+        funding,
+        json.dumps(queries),  # Convert list to JSON string
+        json.dumps(query_results),  # Convert list to JSON string
+        json.dumps(other_info_results),  # Convert dict to JSON string
+        json.dumps(grading_results),  # Convert dict to JSON string
+        recommendation_results
+    ))
+    conn.commit()
+
+    # Close the cursor and connection
+    cur.close()
+    conn.close()
+
+def fetch_answers_from_db(file_id, funding):
+    conn = psycopg2.connect(
+        dbname="postgres",
+        user="postgres.kstfnkkxavowoutfytoq",
+        password="nI20th0in3@",
+        host="aws-0-us-east-1.pooler.supabase.com",
+        port="5432",
+    )
+    cur = conn.cursor()
+
+    create_table_query = """
+        CREATE TABLE IF NOT EXISTS investment_answer_research_pro (
+            file_id VARCHAR(1024) PRIMARY KEY,
+            file_name VARCHAR(1024),
+            funding VARCHAR(1024),
+            queries JSONB,
+            query_results JSONB,
+            other_info_results JSONB,
+            grading_results JSONB,
+            recommendation_results VARCHAR(8192)
+        );
+    """
+    cur.execute(create_table_query)
+    conn.commit()
+
+    fetch_query = """
+    SELECT queries, query_results, other_info_results, grading_results, recommendation_results
+    FROM investment_answer_research_pro
+    WHERE file_id = %s AND funding = %s;
+    """
+    cur.execute(fetch_query, (file_id, funding))
+    result = cur.fetchone()
+    cur.close()
+    conn.close()
+
+    if result:
+        return {
+            "queries": result[0],  # Convert JSON string to list
+            "query_results": result[1],  # Convert JSON string to list
+            "other_info_results": result[2],  # Already JSON
+            "grading_results": result[3],  # Already JSON
+            "recommendation_results": result[4]  # Markdown string
+        }
+    return None
 
 def create_documents(page_contents):
     documents = []
@@ -544,7 +638,7 @@ async def get_docs(question, pdf_content, file_name):
         name_space = existing_namespace
     else:
         document_processing_event.clear()
-        print("evet stopped")
+        print("event stopped")
         print("Document is new. Creating embeddings and new namespace.")
         name_space = get_next_namespace()
         print(name_space)
@@ -750,11 +844,11 @@ def investment(queries, query_results, other_info_results,Funding):
     for response_str in responses:
         response_json = json.loads(response_str)
         combined_json["sectors"].append(response_json)
-        total_score += response_json["overall_score"]
+        total_score = response_json["overall_score"]
         count += 1
 
     if count > 0:
-        combined_json["final_score"] = total_score / count
+        combined_json["final_score"] = total_score
     final_json = json.dumps(combined_json, indent=4)
     print(final_json)
     return final_json
@@ -949,17 +1043,38 @@ async def other_info(pdf_content, file_name):
 
     return results
 
+def categorize_value(value):
+    if value < 1:
+        return "Low"
+    elif 1 <= value <= 10:
+        return "Medium"
+    else:
+        return "High"
+
+
 # Main function adapted for Streamlit
-async def main(file_path,Funding, progress_callback=None):
+async def main(file_path, Funding, progress_callback=None):
+    # Check if the file exists
     if not os.path.isfile(file_path):
         raise FileNotFoundError("File not found.")
-
+     # Read the file content
     with open(file_path, "rb") as file:
         pdf_content = file.read()
-
+    # Get the file name and categorize the funding
     file_name = os.path.basename(file_path)
+    funding_grade = categorize_value(Funding)
+    file_id = get_digest(pdf_content)
+    # Check if the data is already in the database
+    data = fetch_answers_from_db(file_id, funding_grade)
+    data = fetch_answers_from_db(file_id, funding_grade)
+    if data:
+        if progress_callback:
+            progress_callback("Extracting the Information...", 100)
+        if progress_callback:
+            progress_callback("", 0)
+        return (data["queries"], data["query_results"], data["other_info_results"],
+                data["grading_results"], data["recommendation_results"])
 
-    # Process the queries
     # Process the queries
     if progress_callback:
         progress_callback("Answering queries from the pitch deck...", 25)
@@ -977,21 +1092,23 @@ async def main(file_path,Funding, progress_callback=None):
     # Calculate grading results
     if progress_callback:
         progress_callback("Grading the results...", 75)
-    grading_results = json.loads(investment(queries, query_results, other_info_results,Funding))
+    grading_results = json.loads(investment(queries, query_results, other_info_results, Funding))
     if progress_callback:
         progress_callback("", 0)
 
-     # Calculate grading results
+    # Generate recommendations
     if progress_callback:
         progress_callback("Generating Recommendation", 100)
     recommendation_results = recommendations(queries, query_results, other_info_results)
-    print("\n\n\n", query_results, "\n\n\n")
-    print(other_info_results, "\n\n\n")
-    print(grading_results)
     if progress_callback:
         progress_callback("", 0)
 
-    return queries, query_results, other_info_results, grading_results,recommendation_results
+    # Insert the new data into the database
+    insert_answers(file_id, file_name, funding_grade, queries, query_results, other_info_results, grading_results,
+                   recommendation_results)
+
+
+    return queries, query_results, other_info_results, grading_results, recommendation_results
 
 
 # Run the main function
