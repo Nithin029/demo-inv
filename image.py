@@ -1145,4 +1145,3 @@ if __name__ == "__main__":
     Funding = input("Enter the funding value: ")
     loop = asyncio.get_event_loop()
     results = loop.run_until_complete(main(file_path, Funding))
-    
