@@ -483,25 +483,26 @@ def insert_answers(file_id, file_name, funding,queries,query_results,other_info_
     cur = conn.cursor()
     create_table_query = """
             CREATE TABLE IF NOT EXISTS investment_answer_research_pro (
-                file_id VARCHAR(1024) PRIMARY KEY,
+                file_id VARCHAR(1024),
                 file_name VARCHAR(1024),
                 funding VARCHAR(1024),
                 queries JSONB,
                 query_results JSONB,
                 other_info_results JSONB,
                 grading_results JSONB,
-                recommendation_results VARCHAR(8192)
+                recommendation_results VARCHAR(8192),
+                PRIMARY KEY (file_id, funding)
             );
         """
     cur.execute(create_table_query)
     conn.commit()
 
-    # Insert the data into the table
+    # Insert the data into the table or do nothing if there is a conflict on (file_id, funding)
     insert_query = """
-        INSERT INTO investment_answer_research_pro (
-            file_id, file_name, funding, queries, query_results, other_info_results, grading_results, recommendation_results
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (file_id) DO NOTHING;
+            INSERT INTO investment_answer_research_pro (
+                file_id, file_name, funding, queries, query_results, other_info_results, grading_results, recommendation_results
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (file_id, funding) DO NOTHING;
         """
 
     cur.execute(insert_query, (
@@ -520,7 +521,8 @@ def insert_answers(file_id, file_name, funding,queries,query_results,other_info_
     cur.close()
     conn.close()
 
-def fetch_answers_from_db(file_id, funding):
+
+def fetch_answers_from_db(file_id):
     conn = psycopg2.connect(
         dbname="postgres",
         user="postgres.kstfnkkxavowoutfytoq",
@@ -532,38 +534,44 @@ def fetch_answers_from_db(file_id, funding):
 
     create_table_query = """
         CREATE TABLE IF NOT EXISTS investment_answer_research_pro (
-            file_id VARCHAR(1024) PRIMARY KEY,
+            file_id VARCHAR(1024),
             file_name VARCHAR(1024),
             funding VARCHAR(1024),
             queries JSONB,
             query_results JSONB,
             other_info_results JSONB,
             grading_results JSONB,
-            recommendation_results VARCHAR(8192)
+            recommendation_results VARCHAR(8192),
+            PRIMARY KEY (file_id, funding)
         );
     """
     cur.execute(create_table_query)
     conn.commit()
 
     fetch_query = """
-    SELECT queries, query_results, other_info_results, grading_results, recommendation_results
-    FROM investment_answer_research_pro
-    WHERE file_id = %s AND funding = %s;
+        SELECT queries, query_results, other_info_results, grading_results, recommendation_results, funding
+        FROM investment_answer_research_pro
+        WHERE file_id = %s;
     """
-    cur.execute(fetch_query, (file_id, funding))
-    result = cur.fetchone()
+    cur.execute(fetch_query, (file_id,))
+    results = cur.fetchall()
     cur.close()
     conn.close()
 
-    if result:
-        return {
-            "queries": result[0],  # Convert JSON string to list
-            "query_results": result[1],  # Convert JSON string to list
-            "other_info_results": result[2],  # Already JSON
-            "grading_results": result[3],  # Already JSON
-            "recommendation_results": result[4]  # Markdown string
-        }
+    if results:
+        return [
+            {
+                "queries": result[0],
+                "query_results": result[1],
+                "other_info_results": result[2],
+                "grading_results": result[3],
+                "recommendation_results": result[4],
+                "funding": result[5]
+            }
+            for result in results
+        ]
     return None
+
 
 def create_documents(page_contents):
     documents = []
@@ -807,7 +815,7 @@ def investment(queries, query_results, other_info_results,Funding):
                             message=sub_chunk,
                             model=model,
                             SysPrompt=sys_prompt,
-                            temperature=0,
+                            temperature=0.2,
                         )
                         print(response_str)
                         json_part = extract_json(response_str)
@@ -823,7 +831,7 @@ def investment(queries, query_results, other_info_results,Funding):
         else:
             if chunk_token_size >= 500:
                 response_str = response(
-                    message=chunk, model=model, SysPrompt=sys_prompt, temperature=0
+                    message=chunk, model=model, SysPrompt=sys_prompt, temperature=0.1
                 )
                 print(response_str)
                 json_part = extract_json(response_str)
@@ -1054,26 +1062,48 @@ def categorize_value(value):
 
 # Main function adapted for Streamlit
 async def main(file_path, Funding, progress_callback=None):
+    global queries
     # Check if the file exists
     if not os.path.isfile(file_path):
         raise FileNotFoundError("File not found.")
-     # Read the file content
+    # Read the file content
     with open(file_path, "rb") as file:
         pdf_content = file.read()
     # Get the file name and categorize the funding
     file_name = os.path.basename(file_path)
     funding_grade = categorize_value(Funding)
+    print(funding_grade)
     file_id = get_digest(pdf_content)
     # Check if the data is already in the database
-    data = fetch_answers_from_db(file_id, funding_grade)
-    data = fetch_answers_from_db(file_id, funding_grade)
-    if data:
+    data_records = fetch_answers_from_db(file_id)
+    if data_records:
+        for data in data_records:
+            if data['funding'] == funding_grade:
+                if progress_callback:
+                    progress_callback("Extracting the Information...", 100)
+                if progress_callback:
+                    progress_callback("", 0)
+                return (data["queries"], data["query_results"], data["other_info_results"],
+                        data["grading_results"], data["recommendation_results"])
+
+        # If no exact match for funding_grade is found
         if progress_callback:
-            progress_callback("Extracting the Information...", 100)
+            progress_callback("Extracting the Information...", 50)
         if progress_callback:
             progress_callback("", 0)
-        return (data["queries"], data["query_results"], data["other_info_results"],
-                data["grading_results"], data["recommendation_results"])
+        # Take the first record as base for processing
+        first_data = data_records[0]
+        queries, query_results, other_info_results, recommendation_results = (
+            first_data["queries"], first_data["query_results"], first_data["other_info_results"], first_data["recommendation_results"]
+        )
+        if progress_callback:
+            progress_callback("Adjusting the Score....", 100)
+        grading_results = json.loads(investment(queries, query_results, other_info_results, Funding))
+        if progress_callback:
+            progress_callback("", 0)
+        insert_answers(file_id, file_name, funding_grade, queries, query_results, other_info_results, grading_results,
+                       recommendation_results)
+        return queries, query_results, other_info_results, grading_results, recommendation_results
 
     # Process the queries
     if progress_callback:
@@ -1107,12 +1137,12 @@ async def main(file_path, Funding, progress_callback=None):
     insert_answers(file_id, file_name, funding_grade, queries, query_results, other_info_results, grading_results,
                    recommendation_results)
 
-
     return queries, query_results, other_info_results, grading_results, recommendation_results
-
 
 # Run the main function
 if __name__ == "__main__":
     file_path = input("Enter the path to the PDF file: ")
+    Funding = input("Enter the funding value: ")
     loop = asyncio.get_event_loop()
-    results = loop.run_until_complete(main(file_path))
+    results = loop.run_until_complete(main(file_path, Funding))
+    
