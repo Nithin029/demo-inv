@@ -1,0 +1,6 @@
+Markdown==3.6
+reportlab==4.2.0
+beautifulsoup4==4.12.3
+fastapi==0.111.0
+uvicorn==0.29.0
+pandas
